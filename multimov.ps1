@@ -508,8 +508,21 @@ $h_tilecount = 0
 $v_tilecount = 0
 $winborder = 8 # depends on environment/settings?
 
-if ($movieorient -eq 1){	$h_tilecount = [Math]::Floor([Math]::Sqrt($movcount / $movieorient)) # yoko yuusen} else {	if ($movcount -lt $vertical_mov_maxcount){		$h_tilecount = $movcount	} else {		$h_tilecount = [Math]::Ceiling($movcount / $vertical_mov_maxcount)	}}
-$v_tilecount = [Math]::Ceiling($movcount / $h_tilecount)if ($vertical_mov_mincount -gt $v_tilecount){$v_tilecount = $vertical_mov_mincount}$mov_width = [Math]::Ceiling(($width + ($winborder * 2 * $v_tilecount)) / $v_tilecount)$mov_height = [Math]::Ceiling(($height + ($winborder * $h_tilecount)) / $h_tilecount)
+if ($movieorient -eq 1){
+    	$h_tilecount = [Math]::Floor([Math]::Sqrt($movcount / $movieorient)) # yoko yuusen
+} else {
+   	if ($movcount -lt $vertical_mov_maxcount){
+    	$h_tilecount = $movcount
+    } else {
+        $h_tilecount = [Math]::Ceiling($movcount / $vertical_mov_maxcount)
+    }
+}
+$v_tilecount = [Math]::Ceiling($movcount / $h_tilecount)
+if ($vertical_mov_mincount -gt $v_tilecount){$v_tilecount = $vertical_mov_mincount}
+
+$mov_width = [Math]::Ceiling(($width + ($winborder * 2 * $v_tilecount)) / $v_tilecount)
+$mov_height = [Math]::Ceiling(($height + ($winborder * $h_tilecount)) / $h_tilecount)
+
 Write-Debug "tilecount v/h=$v_tilecount/$h_tilecount mov_w/h=$mov_width/$mov_height"
 
 #####
