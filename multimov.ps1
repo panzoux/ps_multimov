@@ -1,4 +1,5 @@
-﻿param(
+﻿[CmdletBinding()]
+param(
     [String]$fol
 )
 
@@ -7,7 +8,12 @@ Add-Type -AssemblyName System.Windows.Forms
 #region func
 
 #region hotkey
-Add-Type -TypeDefinition '
+<#
+https://hinchley.net/articles/creating-a-key-logger-via-a-global-system-hook-using-powershell
+https://stackoverflow.com/questions/54236696/how-to-capture-global-keystrokes-with-powershell
+#>
+$cmd={
+$code = @'
 using System;
 using System.IO;
 using System.Diagnostics;
@@ -21,7 +27,7 @@ namespace KeyLogger {
 
     private static HookProc hookProc = HookCallback;
     private static IntPtr hookId = IntPtr.Zero;
-    private static int keyCode = 0;
+    private static int keyCode = 0;q
 
     [DllImport("user32.dll")]
     private static extern IntPtr CallNextHookEx(IntPtr hhk, int nCode, IntPtr wParam, IntPtr lParam);
@@ -43,7 +49,9 @@ namespace KeyLogger {
     }
 
     private static IntPtr SetHook(HookProc hookProc) {
-      IntPtr moduleHandle = GetModuleHandle(Process.GetCurrentProcess().MainModule.ModuleName);
+      string moduleName = Process.GetCurrentProcess().MainModule.ModuleName;
+      //IntPtr moduleHandle = GetModuleHandle(Process.GetCurrentProcess().MainModule.ModuleName);
+      IntPtr moduleHandle = GetModuleHandle(moduleName);
       return SetWindowsHookEx(WH_KEYBOARD_LL, hookProc, moduleHandle, 0);
     }
 
@@ -58,7 +66,18 @@ namespace KeyLogger {
     }
   }
 }
-' -ReferencedAssemblies System.Windows.Forms
+'@
+Add-Type -TypeDefinition $code -ReferencedAssemblies System.Windows.Forms
+}
+
+$j = Start-Job -ScriptBlock $cmd
+Write-Verbose $j.State
+#do 
+#{
+#    Receive-Job -Job $j
+#
+#} while ( $j.State -eq "Running" )
+
 
 #while ($true) {
 #    $key = [System.Windows.Forms.Keys][KeyLogger.Program]::WaitForKey()
@@ -333,7 +352,7 @@ Process {
 
 function Get-Hwnd($id, $instance = 0){
     $h = Get-Process | Where-Object { $_.Id -match $id } | ForEach-Object { $_.Id }
-    if ( $h -eq $null )
+    if ( $null -eq $h )
     {
         return 0
     }
@@ -349,7 +368,7 @@ function Get-Hwnd($id, $instance = 0){
 
 function Get-Hwnd-title($winTitle, $instance = 0){
     $h = Get-Process | Where-Object { $_.MainWindowTitle -match $winTitle } | ForEach-Object { $_.MainWindowHandle }
-    if ( $h -eq $null )
+    if ( $null -eq $h )
     {
         return 0
     }
@@ -428,54 +447,240 @@ function get-windowrect($id){
 }
 #endregion
 
-function sort-random{
+function Get-RandomSort{
     param(  
     [Parameter(
-        Position=0, 
         Mandatory=$true, 
         ValueFromPipeline=$true,
         ValueFromPipelineByPropertyName=$true)
     ]
-    [String[]]$arr
+    [String[]]$arr,
+    [boolean]$random
     ) 
     process {
         $cpyarr = [System.Collections.ArrayList]::new()
         $retarr = [System.Collections.ArrayList]::new()
 
-        $arr|%{
+        $arr|ForEach-Object{
             [void]$cpyarr.add($_)
         }
 
-        do {
-            $i =  $cpyarr.count - 1
-            $rnd = get-random -Minimum 0 -Maximum $i
-            $retarr += $cpyarr[$rnd]
-            $cpyarr.RemoveAt($rnd)
-            $i--
-        } while ($i -gt 0)
+        if ($random){
+            do {
+                $i =  $cpyarr.count - 1
+                if ($i -gt 0){
+                    $rnd = get-random -Minimum 0 -Maximum $i
+                } else {
+                    $rnd = 0
+                }
+                $retarr += $cpyarr[$rnd]
+                $cpyarr.RemoveAt($rnd)
+                $i--
+            } while ($i -ge 0)
+        } else {
+            $retarr=$cpyarr
+        }
         return $retarr
     }
 }
 
 function killprocess($processpath){
-    stop-process -name (gci $processpath).BaseName -ErrorAction SilentlyContinue
+    stop-process -name (Get-ChildItem $processpath).BaseName -ErrorAction SilentlyContinue
 }
 
+function get-VideoResolution($source){
+## https://automationadmin.com/2017/12/ps-get-video-file-resolution-from-folder/
+## sample:
+## 
+##    $res = get-VideoResolution "C:\Users\foo\Videos\bar.mp4"
+##    "width,height={0},{1}" -f $res.A_フレーム幅,$res.A_フレーム高
+##
+
+    if (Test-Path -LiteralPath $Source -PathType Container){
+        $Sourcefolder=$Source
+        $Sourcefile=''
+    } else {
+        $Sourcefolder=Split-Path $Source -Parent
+        $Sourcefile=Split-Path $Source -Leaf
+    }
+
+    $Objshell = New-Object -Comobject Shell.Application 
+
+    $Filelist = @() 
+    $Attrlist = @{} 
+    #$Details = ( "Frame Height", "Frame Width", "Frame Rate" ) # depends on OS language...
+    $Details = ( "フレーム高", "フレーム幅", "フレーム率" ) 
+   
+    $Objfolder = $Objshell.Namespace($Sourcefolder) 
+    For ($Attr = 0 ; $Attr -Le 500; $Attr++) 
+    { 
+        $Attrname = $Objfolder.Getdetailsof($Objfolder.Items, $Attr) 
+        If ( $Attrname -And ( -Not $Attrlist.Contains($Attrname) )) 
+        {  
+            $Attrlist.Add( $Attrname, $Attr )  
+        } 
+    } 
+   
+    Foreach ($File In $Objfolder.Items()) 
+    {
+        if (($Sourcefile -eq '') -or ($Sourcefile -eq $File.Name)){
+
+            Foreach ( $Attr In $Details) 
+            { 
+                $Attrvalue = $Objfolder.Getdetailsof($File, $Attrlist[$Attr]) 
+                If ( $Attrvalue )  
+                {  
+                    Add-Member -Inputobject $File -Membertype Noteproperty -Name $("A_" + $Attr) -Value $Attrvalue 
+                }  
+            } 
+            $Filelist += $File 
+        }
+    } 
+    $Filelist
+}
+
+function Get-CyclicSubArray {
+    param (
+        [Parameter(Mandatory=$true)]
+        [array]$InputArray,
+        
+        [Parameter(Mandatory=$true)]
+        [int]$StartIndex,
+        
+        [Parameter(Mandatory=$true)]
+        [int]$Count
+    )
+    <#
+    指定配列から開始位置と取得する要素数を指定し、末尾を超過した場合は配列の先頭から続きを取得する関数
+    #>
+
+    # 配列の長さを取得
+    $ArrayLength = $InputArray.Length
+
+    # 結果を格納する配列を初期化
+    $ResultArray = @()
+
+    # 指定された数の要素を取得
+    for ($i = 0; $i -lt $Count; $i++) {
+        # 現在のインデックスを計算（循環的に）
+        $CurrentIndex = ($StartIndex + $i) % $ArrayLength
+        
+        # 要素を結果配列に追加
+        $ResultArray += $InputArray[$CurrentIndex]
+    }
+
+    return $ResultArray
+}
 #endregion
 
+$filter="*.*"
 if ($fol -eq ""){
     Write-Warning "folder not specified"
     exit
 }
+
 if (!(Test-Path $fol)){
-    Write-Warning "folder not found : $fol"
+    Write-Warning "Not:found: $fol"
     exit
+} 
+
+enum movieorienttype {
+    guess = 0
+    yoko  = 1
+    tate  = 2
 }
 
-$mov_maxcount = 12
+$loopflg = $true
+$movlist_pos=0
 
-$mov=(,((gci $fol -file).FullName)) | sort-random | select -First $mov_maxcount
+$mov_maxcount = 3
+$movieorient = [movieorienttype]::guess #0=guess 1=yoko 2=tate
+$horizontal_mov_mincount = 6 #horizontal=yoko
+$vertical_mov_mincount = 1   #vertical=tate
+$h_tilecount = 0
+$v_tilecount = 0
+$winborder = 8 # depends on environment/settings?
+$keys_exit=@('Q','Space','Escape')
+$keys_next=@('N','Emter')
+$random=$false
+#$random=$true
 
+$movlistall = (,((Get-ChildItem $fol -file -Filter $filter).FullName))|sort-random -random $random
+
+#guess movie orient from movlistall
+if ($movieorient -eq [movieorienttype]::guess){
+    $h_mov_count = 0
+    $v_mov_count = 0
+    $movlistall | Select-Object -First $mov_maxcount | ForEach-Object {
+        $res = get-VideoResolution $_
+        if ([int]$res.A_フレーム幅 -gt [int]$res.A_フレーム高){
+            $h_mov_count++
+        } else {
+            $v_mov_count++
+        }
+        #"dbg: {1},{2} h={3} v={4}:{0}" -f $res.name,$res.A_フレーム幅,$res.A_フレーム高, $h_mov_count, $v_mov_count
+    }
+    if ($h_mov_count -ge $v_mov_count){
+        $movieorient = [movieorienttype]::yoko
+    } else {
+        $movieorient = [movieorienttype]::tate
+    }
+    write-host ("guessing movie orient ... horizontal,vertical={0},{1} => {2}" -f $h_mov_count,$v_mov_count,[movieorienttype].GetEnumName($movieorient))
+}
+
+switch ($movieorient){
+    ([movieorienttype]::yoko) {
+        $mov_count = [math]::Ceiling($mov_maxcount/$vertical_mov_mincount) * $vertical_mov_mincount
+    }
+    ([movieorienttype]::tate) {
+        $mov_count = [math]::Ceiling($mov_maxcount/$horizontal_mov_mincount) * $horizontal_mov_mincount
+    }
+}
+
+
+"dbg: 0 mov_count=$mov_count mov_maxcount=$mov_maxcount movieorient=$movieorient"
+#pause
+
+switch ($movieorient){
+    ([movieorienttype]::yoko) {
+	    $v_tilecount = [Math]::Ceiling([Math]::Sqrt($mov_count / 2))
+        if ($v_tilecount -lt $vertical_mov_mincount){
+            $v_tilecount = $vertical_mov_mincount
+        }
+
+        $h_tilecount = [Math]::Ceiling($mov_count / $v_tilecount)
+
+        if ($h_tilecount -eq 1){
+            if ($v_tilecount -gt $mov_maxcount){
+                $v_tilecount = $mov_maxcount
+                $mov_count = $mov_maxcount
+            }
+        } else {
+            $mov_count = $h_tilecount * $v_tilecount
+        }
+
+    }
+    ([movieorienttype]::tate) {
+	    $h_tilecount = [Math]::Ceiling([Math]::Sqrt($mov_count / 2))
+        if ($h_tilecount -lt $horizontal_mov_mincount){
+            $h_tilecount = $horizontal_mov_mincount
+        }
+
+        $v_tilecount = [Math]::Ceiling($mov_count / $h_tilecount)
+
+        if ($v_tilecount -eq 1){
+            if ($h_tilecount -gt $mov_maxcount){
+                $h_tilecount = $mov_maxcount
+                $mov_count = $mov_maxcount
+            }
+        } else {
+            $mov_count = $h_tilecount * $v_tilecount
+        }
+    }
+}
+
+
+# get display size nad taskbar size
 $screen_width=[System.Windows.Forms.SystemInformation]::WorkingArea.Width
 $screen_height=[System.Windows.Forms.SystemInformation]::WorkingArea.Height
 $taskbar = Get-TaskBarDimensions
@@ -500,67 +705,57 @@ if ($taskbar.Position -in ('Top','Bottom')){
     $y_start = 0
 }
 
-$movcount = $mov.count
-$movieorient = 2 #1=yoko 2=tate
-$vertical_mov_mincount = 0
-$vertical_mov_maxcount = 6
-$h_tilecount = 0
-$v_tilecount = 0
-$winborder = 8 # depends on environment/settings?
+# get movie width,height from display size, h/v tilecount
+$mov_width = [Math]::Ceiling(($width + ($winborder * 2 * $h_tilecount)) / $h_tilecount)
+$mov_height = [Math]::Ceiling(($height + ($winborder * $v_tilecount)) / $v_tilecount)
 
-if ($movieorient -eq 1){
-    	$h_tilecount = [Math]::Floor([Math]::Sqrt($movcount / $movieorient)) # yoko yuusen
-} else {
-   	if ($movcount -lt $vertical_mov_maxcount){
-    	$h_tilecount = $movcount
-    } else {
-        $h_tilecount = [Math]::Ceiling($movcount / $vertical_mov_maxcount)
+#$mov = $movlistall | Select-Object -First $mov_maxcount
+
+"dbg:mov_count=$mov_count tilecount v/h=$v_tilecount/$h_tilecount mov_w/h=$mov_width/$mov_height"
+
+
+while ($loopflg){
+
+    #$mov = $movlistall[$movlist_pos..  ($movlist_pos + $mov_maxcount)]
+    $mov = Get-CyclicSubArray $movlistall $movlist_pos $mov_count
+
+
+    #####
+    $vlcPath = "C:\Program Files\VideoLAN\VLC\vlc.exe"
+    $vlcarg = @(
+        '--qt-minimal-view',
+        '--no-video-deco',
+        '--no-qt-video-autoresize',
+        '--qt-name-in-title',
+        '--qt-continue=0',
+        '--no-qt-updates-notif',
+        '--no-qt-recentplay',
+        '--loop',
+    # not working (bug in vlc3?)
+        '--width=0',
+        '--height=0',
+        "--video-x=0",
+        "--video-y=0",
+    # unusable. can't continue script
+    #    '--no-embedded-video',
+    # unusable. can't change position
+    #    '--intf=d',
+    #    '--dummy-quiet',
+    # not working
+    #    '--mmdevice-volume=0.100000',
+    #    '--directx-volume=0.100000',
+    #    '--waveout-volume=0.100000',
+    #    '--volume=50',
+        '' # this blank is used to set movie file path
+    )
+    $vlcarr = [System.Collections.ArrayList]::new()
+
+    killprocess $vlcPath
+
+    $mov|ForEach-Object{
+        $vlcarg[$vlcarg.count-1]="""$_"""
+        $vlcarr += Start-Process $vlcpath -ArgumentList $vlcarg -PassThru
     }
-}
-$v_tilecount = [Math]::Ceiling($movcount / $h_tilecount)
-if ($vertical_mov_mincount -gt $v_tilecount){$v_tilecount = $vertical_mov_mincount}
-
-$mov_width = [Math]::Ceiling(($width + ($winborder * 2 * $v_tilecount)) / $v_tilecount)
-$mov_height = [Math]::Ceiling(($height + ($winborder * $h_tilecount)) / $h_tilecount)
-
-Write-Debug "tilecount v/h=$v_tilecount/$h_tilecount mov_w/h=$mov_width/$mov_height"
-
-#####
-$vlcPath = "C:\Program Files\VideoLAN\VLC\vlc.exe"
-$vlcarg = @(
-    '--qt-minimal-view',
-    '--no-video-deco',
-    '--no-qt-video-autoresize',
-    '--qt-name-in-title',
-    '--qt-continue=0',
-    '--no-qt-updates-notif',
-    '--no-qt-recentplay',
-    '--loop',
-# not working (bug in vlc3?)
-#    '--width=0',
-#    '--height=0',
-#    "--video-x=0",
-#    "--video-y=0",
-# unusable. can't continue script
-#    '--no-embedded-video',
-# unusable. can't change position
-#    '--intf=d',
-#    '--dummy-quiet',
-# not working
-#    '--mmdevice-volume=0.100000',
-#    '--directx-volume=0.100000',
-#    '--waveout-volume=0.100000',
-#    '--volume=50',
-    '' # this blank is used to set movie file path
-)
-$vlcarr = [System.Collections.ArrayList]::new()
-
-killprocess $vlcPath
-
-$mov|%{
-    $vlcarg[$vlcarg.count-1]="""$_"""
-    $vlcarr += Start-Process $vlcpath -ArgumentList $vlcarg -PassThru
-}
 
 # wait for vlc processes to start
 Do{
@@ -578,7 +773,7 @@ if ($chktitle){
     $i=0
     do {
         $i=0
-        $mov|%{
+        $mov|ForEach-Object{
             $filename = split-path $_ -Leaf
             $hwnd = Get-Hwnd-title "$filename - VLCメディアプレイヤー"
             if ($hwnd -ne 0){
@@ -597,7 +792,7 @@ if ($chktitle){
 Write-Host "waiting for vlc windows..."
 do {
     $i=0
-    $vlcarr|%{
+    $vlcarr|ForEach-Object{
         $mainwindowhandle = (Get-Process -Id $_.id).MainWindowHandle
         Write-Debug "dbg: $($_.id) $mainwindowhandle"
         if ($mainwindowhandle -ne 0){
@@ -608,34 +803,42 @@ do {
     Start-Sleep -Milliseconds 300
 }while ($i -lt $movcount)
 
-#start-sleep 3
-
 # arrange window position and size
 [int]$x=$x_start
 [int]$y=$y_start
 [int]$w=$mov_width
 [int]$h=$mov_height
 $i=0
-$vlcarr|%{
+$vlcarr|ForEach-Object{
     #Set-Window -Id $_.id -X $x -Y $y -Width $w -Height $h -Passthru -Verbose
     Set-Window -Id $_.id -X $x -Y $y -Width $w -Height $h
     $x += $w - ($winborder * 2)
     $i++
-    if ($i -ge $v_tilecount){
+    if ($i -ge $h_tilecount){
         $x = $x_start
         $y += $h - $winborder
-        $i -= $v_tilecount
+        $i -= $h_tilecount
     }
 }
 
-#####
-$loopflg=$true
 
-while ($loopflg) {
-    $key = [System.Windows.Forms.Keys][KeyLogger.Program]::WaitForKey()
-    if ($key -eq "Q") {
-        Write-Host "quitting.."
-        killprocess $vlcPath
-        $loopflg=$false
+    #####
+    $playflg=$true
+
+    while ($playflg) {
+        $key = [System.Windows.Forms.Keys][KeyLogger.Program]::WaitForKey()
+        "[$key]"
+        if ($key -in $keys_exit) {
+            Write-Host "quitting.."
+            killprocess $vlcPath
+            $playflg=$false
+            $loopflg=$false
+        }
+        if ($key -in $keys_next) {
+            Write-Host "next.."
+            $playflg=$false
+            $movlist_pos += $mov_count
+        }
     }
+
 }
