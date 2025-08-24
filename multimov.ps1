@@ -76,8 +76,6 @@ https://stackoverflow.com/questions/54236696/how-to-capture-global-keystrokes-wi
 #    start-sleep -Milliseconds 300
 #}
 
-#endregion
-
 function Get-TaskBarDimensions {
     param (
         [System.Windows.Forms.Screen]$Screen = [System.Windows.Forms.Screen]::PrimaryScreen
