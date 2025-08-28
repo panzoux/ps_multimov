@@ -3,6 +3,13 @@ param(
     [String]$fol
 )
 
+enum movieorienttype {
+    guess = 0
+    yoko  = 1
+    tate  = 2
+}
+
+
 Add-Type -AssemblyName System.Windows.Forms
 
 #region func
@@ -559,16 +566,268 @@ function Get-CyclicSubArray {
 
     return $ResultArray
 }
+
+<#
+powershell  で get-closestdivisor  を実装
+第1パラメータで、約数を取得する数値を指定
+第2パラメータで、最近値取得用基準値を指定
+第3パラメータで、指定値未満最近値、指定値最近値、指定値以上最近値の3パターンを取得できるように
+#>
+
+function Get-ClosestDivisor {
+    param (
+        [int]$Number,        # 約数を取得する数値
+        [int]$Reference,     # 最近値取得用基準値
+        [ValidateSet("lt", "nearest", "gt")]
+        [string]$Mode        # 取得モード
+    )
+
+    write-host ("dbg: getclosestdivisor {0} {1} {2}" -f $Number, $Reference, $Mode)
+
+    # 約数を取得するためのリスト
+    $divisors = @()
+
+    # 約数を計算
+    for ($i = 1; $i -le $Number; $i++) {
+        if ($Number % $i -eq 0) {
+            $divisors += $i
+        }
+    }
+
+    # 基準値に基づいて最近値を取得
+    switch ($Mode) {
+        "lt" {
+            $closest = $divisors | Where-Object { $_ -lt $Reference } | Sort-Object -Descending | Select-Object -First 1
+        }
+        "nearest" {
+            $closest = $divisors | Where-Object { $_ -eq $Reference } | Select-Object -First 1
+        }
+        "gt" {
+            $closest = $divisors | Where-Object { $_ -gt $Reference } | Sort-Object | Select-Object -First 1
+        }
+    }
+
+    return $closest
+}
+
+# 使用例
+# Get-ClosestDivisor -Number 12 -Reference 5 -Mode "LessThan"
+# Get-ClosestDivisor -Number 12 -Reference 6 -Mode "EqualTo"
+# Get-ClosestDivisor -Number 12 -Reference 10 -Mode "GreaterThan"
+
+function Get-RectangleMatrix_1{
+    param (
+        [float]$ContainerWidth,  # 元の矩形の幅
+        [float]$ContainerHeight, # 元の矩形の高さ
+        [int]$mov_maxcount, # 最大表示数
+        [movieorienttype]$movieorient,  # 0=guess 1=yoko 2=tate
+        [int]$vertical_mov_mincount,   #vertical=tate
+        [int]$horizontal_mov_mincount, #horizontal=yoko
+        [int]$winborder
+    )
+
+    switch ($movieorient){
+        ([movieorienttype]::yoko) {
+            $mov_count = [math]::Ceiling($mov_maxcount/$vertical_mov_mincount) * $vertical_mov_mincount
+        }
+        ([movieorienttype]::tate) {
+            $mov_count = [math]::Ceiling($mov_maxcount/$horizontal_mov_mincount) * $horizontal_mov_mincount
+        }
+    }
+
+    write-host "dbg: 0 mov_count=$mov_count mov_maxcount=$mov_maxcount movieorient=$movieorient"
+    #pause
+
+    switch ($movieorient){
+        ([movieorienttype]::yoko) {
+            $v_tilecount = [Math]::Ceiling([Math]::Sqrt($mov_count / 2))
+            if ($v_tilecount -lt $vertical_mov_mincount){
+                $v_tilecount = $vertical_mov_mincount
+            }
+
+            $h_tilecount = [Math]::Ceiling($mov_count / $v_tilecount)
+
+            if ($h_tilecount -eq 1){
+                if ($v_tilecount -gt $mov_maxcount){
+                    $v_tilecount = $mov_maxcount
+                    $mov_count = $mov_maxcount
+                }
+            } else {
+                $mov_count = $h_tilecount * $v_tilecount
+            }
+
+        }
+        ([movieorienttype]::tate) {
+            $h_tilecount = [Math]::Ceiling([Math]::Sqrt($mov_count / 2))
+            if ($h_tilecount -lt $horizontal_mov_mincount){
+                $h_tilecount = $horizontal_mov_mincount
+            }
+
+            $v_tilecount = [Math]::Ceiling($mov_count / $h_tilecount)
+
+            if ($v_tilecount -eq 1){
+                if ($h_tilecount -gt $mov_maxcount){
+                    $h_tilecount = $mov_maxcount
+                    $mov_count = $mov_maxcount
+                }
+            } else {
+                $mov_count = $h_tilecount * $v_tilecount
+            }
+        }
+    }
+
+    if ($h_tilecount -eq 1){
+        if ($v_tilecount -gt $mov_maxcount){
+            $v_tilecount = $mov_maxcount
+            $mov_count = $mov_maxcount
+        }
+    } else {
+        $mov_count = $h_tilecount * $v_tilecount
+    }
+    if ($v_tilecount -eq 1){
+        if ($h_tilecount -gt $mov_maxcount){
+            $h_tilecount = $mov_maxcount
+            $mov_count = $mov_maxcount
+        }
+    } else {
+        $mov_count = $h_tilecount * $v_tilecount
+    }
+
+    $disp = get-displaysize
+    $width = $disp.width
+    $height = $disp.height
+    $winborder = $disp.winborder
+    #$x_start = $disp.x_start
+    #$y_start = $disp.y_start
+
+    write-host "dbg: 0 mov_count=$mov_count mov_maxcount=$mov_maxcount movieorient=$movieorient"
+
+    #$mov = $movlistall | Select-Object -First $mov_maxcount
+
+    # get movie width,height from display size, h/v tilecount
+    $mov_width = [Math]::Ceiling(($width + ($winborder * 2 * $h_tilecount)) / $h_tilecount)
+    $mov_height = [Math]::Ceiling(($height + ($winborder * $v_tilecount)) / $v_tilecount)
+
+    "dbg:mov_count=$mov_count tilecount v/h=$v_tilecount/$h_tilecount mov_w/h=$mov_width/$mov_height"
+
+    return [PSCustomObject]@{
+        Width            = $mov_width
+        Height           = $mov_height
+        Columns          = $h_tilecount
+        Rows             = $v_tilecount
+        Mov_Count        = $mov_count
+    }
+
+}
+
+function Get-RectangleMatrix_2 {
+    param (
+        [float]$ContainerWidth,  # 元の矩形の幅
+        [float]$ContainerHeight, # 元の矩形の高さ
+        [int]$mov_maxcount,      # 最大表示数
+        [movieorienttype]$movieorient,  # 0=guess 1=yoko 2=tate
+        [int]$vertical_mov_mincount,   # 縦の最小表示数
+        [int]$horizontal_mov_mincount, # 横の最小表示数
+        [int]$winborder           # ウィンドウの境界
+    )
+
+    # 表示するタイル数、縦横のタイル数を計算
+    switch ($movieorient) {
+        ([movieorienttype]::yoko) {
+            $mov_count = [math]::Ceiling($mov_maxcount / $vertical_mov_mincount) * $vertical_mov_mincount
+            $v_tilecount = [Math]::Ceiling([Math]::Sqrt($mov_count / 2))
+            if ($v_tilecount -lt $vertical_mov_mincount) {
+                $v_tilecount = $vertical_mov_mincount
+            }
+            $h_tilecount = [Math]::Ceiling($mov_count / $v_tilecount)
+        }
+        ([movieorienttype]::tate) {
+            $mov_count = [math]::Ceiling($mov_maxcount / $horizontal_mov_mincount) * $horizontal_mov_mincount
+            $h_tilecount = [Math]::Ceiling([Math]::Sqrt($mov_count / 2))
+            if ($h_tilecount -lt $horizontal_mov_mincount) {
+                $h_tilecount = $horizontal_mov_mincount
+            }
+            $v_tilecount = [Math]::Ceiling($mov_count / $h_tilecount)
+        }
+    }
+
+    # タイル数の調整
+    if ($h_tilecount -eq 1 -and $v_tilecount -gt $mov_maxcount) {
+        $v_tilecount = $mov_maxcount
+        $mov_count = $mov_maxcount
+    } elseif ($v_tilecount -eq 1 -and $h_tilecount -gt $mov_maxcount) {
+        $h_tilecount = $mov_maxcount
+        $mov_count = $mov_maxcount
+    } else {
+        $mov_count = $h_tilecount * $v_tilecount
+    }
+
+    # ディスプレイサイズを取得
+    $disp = Get-DisplaySize
+    $width = $disp.width
+    $height = $disp.height
+    $winborder = $disp.winborder
+
+    # 動画の幅と高さを計算
+    $mov_width = [Math]::Ceiling(($width + ($winborder * 2 * $h_tilecount)) / $h_tilecount)
+    $mov_height = [Math]::Ceiling(($height + ($winborder * $v_tilecount)) / $v_tilecount)
+
+    # デバッグ情報
+    write-host "dbg: mov_maxcount=$mov_maxcount movieorient=$movieorient"
+    write-host "dbg: mov_count=$mov_count tilecount v/h=$v_tilecount/$h_tilecount mov_w/h=$mov_width/$mov_height"
+
+    # 結果を返す
+    return [PSCustomObject]@{
+        Width     = $mov_width
+        Height    = $mov_height
+        Columns   = $h_tilecount
+        Rows      = $v_tilecount
+        Mov_Count = $mov_count
+    }
+}
+
+function get-displaysize
+{
+    # get display size nad taskbar size
+    $screen_width=[System.Windows.Forms.SystemInformation]::WorkingArea.Width
+    $screen_height=[System.Windows.Forms.SystemInformation]::WorkingArea.Height
+    $taskbar = Get-TaskBarDimensions
+    if ($taskbar.Position -in ('Top','Bottom')){
+        $width = $screen_width
+        #$height = $screen_height - $taskbar.height
+        $height = $screen_height
+        $x_start = 0
+        if ($taskbar.Position -eq 'Top'){
+            $y_start = $taskbar.Height
+        } else {
+            $y_start = 0
+        }
+    } else {
+        $width = $screen_width - $taskbar.width
+        $height = $screen_height
+        if ($taskbar.Position -eq 'Left'){
+            $x_start = $taskbar.Width
+        } else {
+            $x_start = 0
+        }
+        $y_start = 0
+    }
+
+    $winborder = 8 # depends on environment/settings?
+
+    return [PSCustomObject]@{
+        Width            = $width
+        Height           = $height
+        x_start          = $x_start
+        y_start          = $y_start
+        winborder        = $winborder
+    }
+}
+
 #endregion
 
 #region main
 <# multimov #>
-
-enum movieorienttype {
-    guess = 0
-    yoko  = 1
-    tate  = 2
-}
 
 if ($fol -eq ""){
     Write-Warning "folder not specified"
@@ -590,11 +849,10 @@ $horizontal_mov_mincount = 6 #horizontal=yoko
 $vertical_mov_mincount = 1   #vertical=tate
 $h_tilecount = 0
 $v_tilecount = 0
-$winborder = 8 # depends on environment/settings?
 $keys_exit=@('Q','Space','Escape')
 $keys_next=@('N','Emter')
 $random=$false
-#$random=$true
+$random=$true
 
 $movlistall = (,((Get-ChildItem $fol -file -Filter $filter).FullName))|Get-RandomSort -random $random
 
@@ -619,6 +877,7 @@ if ($movieorient -eq [movieorienttype]::guess){
     write-host ("guessing movie orient ... horizontal,vertical={0},{1} => {2}" -f $h_mov_count,$v_mov_count,[movieorienttype].GetEnumName($movieorient))
 }
 
+<#
 switch ($movieorient){
     ([movieorienttype]::yoko) {
         $mov_count = [math]::Ceiling($mov_maxcount/$vertical_mov_mincount) * $vertical_mov_mincount
@@ -627,7 +886,6 @@ switch ($movieorient){
         $mov_count = [math]::Ceiling($mov_maxcount/$horizontal_mov_mincount) * $horizontal_mov_mincount
     }
 }
-
 
 "dbg: 0 mov_count=$mov_count mov_maxcount=$mov_maxcount movieorient=$movieorient"
 #pause
@@ -670,40 +928,53 @@ switch ($movieorient){
     }
 }
 
-
-# get display size nad taskbar size
-$screen_width=[System.Windows.Forms.SystemInformation]::WorkingArea.Width
-$screen_height=[System.Windows.Forms.SystemInformation]::WorkingArea.Height
-$taskbar = Get-TaskBarDimensions
-if ($taskbar.Position -in ('Top','Bottom')){
-    $width = $screen_width
-    #$height = $screen_height - $taskbar.height
-    $height = $screen_height
-    $x_start = 0
-    if ($taskbar.Position -eq 'Top'){
-        $y_start = $taskbar.Height
-    } else {
-        $y_start = 0
+if ($h_tilecount -eq 1){
+    if ($v_tilecount -gt $mov_maxcount){
+        $v_tilecount = $mov_maxcount
+        $mov_count = $mov_maxcount
     }
 } else {
-    $width = $screen_width - $taskbar.width
-    $height = $screen_height
-    if ($taskbar.Position -eq 'Left'){
-        $x_start = $taskbar.Width
-    } else {
-        $x_start = 0
-    }
-    $y_start = 0
+    $mov_count = $h_tilecount * $v_tilecount
 }
+if ($v_tilecount -eq 1){
+    if ($h_tilecount -gt $mov_maxcount){
+        $h_tilecount = $mov_maxcount
+        $mov_count = $mov_maxcount
+    }
+} else {
+    $mov_count = $h_tilecount * $v_tilecount
+}
+
+$disp = get-displaysize
+$width = $disp.width
+$height = $disp.height
+$x_start = $disp.x_start
+$y_start = $disp.y_start
+
+"dbg: 0 mov_count=$mov_count mov_maxcount=$mov_maxcount movieorient=$movieorient"
+
+#$mov = $movlistall | Select-Object -First $mov_maxcount
 
 # get movie width,height from display size, h/v tilecount
 $mov_width = [Math]::Ceiling(($width + ($winborder * 2 * $h_tilecount)) / $h_tilecount)
 $mov_height = [Math]::Ceiling(($height + ($winborder * $v_tilecount)) / $v_tilecount)
 
-#$mov = $movlistall | Select-Object -First $mov_maxcount
-
 "dbg:mov_count=$mov_count tilecount v/h=$v_tilecount/$h_tilecount mov_w/h=$mov_width/$mov_height"
+#>
 
+$disp = get-displaysize
+$x_start = $disp.x_start
+$y_start = $disp.y_start
+$winborder = $disp.winborder
+
+#$rmatrix = Get-RectangleMatrix_1 -ContainerWidth $disp.width -ContainerHeight $disp.height -mov_maxcount $mov_maxcount -movieorient $movieorient -vertical_mov_mincount $vertical_mov_mincount -horizontal_mov_mincount $horizontal_mov_mincount
+$rmatrix = Get-RectangleMatrix_2 -ContainerWidth $disp.width -ContainerHeight $disp.height -mov_maxcount $mov_maxcount -movieorient $movieorient -vertical_mov_mincount $vertical_mov_mincount -horizontal_mov_mincount $horizontal_mov_mincount
+$mov_width = $rmatrix.Width
+$mov_height = $rmatrix.Height
+$h_tilecount = $rmatrix.Columns
+$v_tilecount = $rmatrix.Rows
+$mov_count = $rmatrix.Mov_Count
+"dbg:mov_count=$mov_count tilecount v/h=$v_tilecount/$h_tilecount mov_w/h=$mov_width/$mov_height xyoffset=$($disp.x_start),$($disp.y_start)"
 
 while ($loopflg){
 
@@ -781,18 +1052,31 @@ if ($chktitle){
 #  we cannot use movie_title, 1 or more titles can be null.
 #  instead, we check mainwindowhandle!=0 to wait for vlc windows are opened
 Write-Host "waiting for vlc windows..."
+<#
 do {
     $i=0
     $vlcarr|ForEach-Object{
         $mainwindowhandle = (Get-Process -Id $_.id).MainWindowHandle
-        Write-Debug "dbg: $($_.id) $mainwindowhandle"
+        Write-verbose "dbg: $($_.id) $mainwindowhandle"
         if ($mainwindowhandle -ne 0){
+            Write-Verbose "vlc $($_.id) mainwindowhandle found=$i"
             $i++
+        } else {
+            Write-Verbose "vlc $($_.id) mainwindowhandle not found=$i"
         }
     }
-    Write-Verbose "vlc handle found=$i"
     Start-Sleep -Milliseconds 300
 }while ($i -lt $movcount)
+#>
+
+$vlcarr|ForEach-Object{
+    do {
+        $mainwindowhandle = (Get-Process -Id $_.id).MainWindowHandle
+        Write-verbose "dbg: $($_.id) $mainwindowhandle"
+        Start-Sleep -Milliseconds 300
+    }while ($mainwindowhandle -eq 0)
+}
+
 
 # arrange window position and size
 [int]$x=$x_start
@@ -810,6 +1094,7 @@ $vlcarr|ForEach-Object{
         $y += $h - $winborder
         $i -= $h_tilecount
     }
+    #"dbg {0} {1},{2} {3},{4}" -f $_.Id,$x,$y,$w,$h
 }
 
 
