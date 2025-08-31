@@ -1,6 +1,7 @@
 ﻿[CmdletBinding()]
 param(
-    [String]$fol
+    [String]$fol,
+    [String]$filter
 )
 
 enum movieorienttype {
@@ -13,8 +14,7 @@ enum movieorienttype {
 Add-Type -AssemblyName System.Windows.Forms
 
 #region func
-<#
-#>
+<##>
 
 <#
 https://hinchley.net/articles/creating-a-key-logger-via-a-global-system-hook-using-powershell
@@ -839,7 +839,7 @@ if (!(Test-Path $fol)){
     exit
 } 
 
-$filter="*.*"
+if ($filter -eq "") {$filter="*.*"}
 $loopflg = $true
 $movlist_pos=0
 
