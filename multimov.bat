@@ -1,1 +1,1 @@
-powershell -command %~dp0multimov.ps1 %*
+powershell -command %~dpn0.ps1 %*

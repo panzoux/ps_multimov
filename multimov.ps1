@@ -1,4 +1,27 @@
-﻿[CmdletBinding()]
+﻿<#
+.SYNOPSIS
+    複数動画ファイルをVLCでタイル表示するスクリプト
+
+.DESCRIPTION
+    指定フォルダ内の動画ファイルを取得し、VLCメディアプレイヤーでタイル状に並べて再生します。
+    動画の向き（横/縦）を自動判定し、ウィンドウサイズ・位置を自動調整します。
+    キー操作で終了や次の動画セットへの切り替えが可能です。
+
+.PARAMETER fol
+    動画ファイルが格納されているフォルダのパス
+
+.PARAMETER filter
+    動画ファイルのフィルター（例: *.mp4）
+
+.EXAMPLE
+    .\multimov.ps1 -fol "C:\Videos" -filter "*.mp4"
+
+.NOTES
+    Author: panzoux
+    Date: 2025-10-04
+#>
+
+    [CmdletBinding()]
 param(
     [String]$fol,
     [String]$filter
@@ -697,12 +720,8 @@ function Get-RectangleMatrix_1{
     $width = $disp.width
     $height = $disp.height
     $winborder = $disp.winborder
-    #$x_start = $disp.x_start
-    #$y_start = $disp.y_start
 
-    write-host "dbg: 0 mov_count=$mov_count mov_maxcount=$mov_maxcount movieorient=$movieorient"
-
-    #$mov = $movlistall | Select-Object -First $mov_maxcount
+    #write-host "dbg: 0 mov_count=$mov_count mov_maxcount=$mov_maxcount movieorient=$movieorient"
 
     # get movie width,height from display size, h/v tilecount
     $mov_width = [Math]::Ceiling(($width + ($winborder * 2 * $h_tilecount)) / $h_tilecount)
@@ -924,52 +943,9 @@ $movlistall = (,((Get-ChildItem $fol -file -Filter $filter).FullName))|Get-Rando
 
 if ($movlistall.count -lt $mov_maxcount){$mov_count = $movlistall.count} else {$mov_count = $mov_maxcount}
 
-#guess movie orient
-<#
-if ($movieorient -eq [movieorienttype]::guess){
-    $h_mov_count = 0
-    $v_mov_count = 0
-    $movlistall | Select-Object -First $mov_maxcount | ForEach-Object {
-        $res = get-VideoResolution $_
-        if ([int]$res.A_フレーム幅 -gt [int]$res.A_フレーム高){
-            $h_mov_count++
-        } else {
-            $v_mov_count++
-        }
-        #"dbg: {1},{2} h={3} v={4}:{0}" -f $res.name,$res.A_フレーム幅,$res.A_フレーム高, $h_mov_count, $v_mov_count
-    }
-    if ($h_mov_count -ge $v_mov_count){
-        $movieorient = [movieorienttype]::yoko
-    } else {
-        $movieorient = [movieorienttype]::tate
-    }
-    write-host ("guessing movie orient ... horizontal,vertical={0},{1} => {2}" -f $h_mov_count,$v_mov_count,[movieorienttype].GetEnumName($movieorient))
-}
-#>
-
-<#
-$movieorient = get-movie-orient -movie_list @($movlistall | Select-Object -First $mov_maxcount) -movie_orient_type $movieorient
-
-$disp = get-displaysize
-$x_start = $disp.x_start
-$y_start = $disp.y_start
-$winborder = $disp.winborder
-
-#$rmatrix = Get-RectangleMatrix_1 -ContainerWidth $disp.width -ContainerHeight $disp.height -mov_maxcount $mov_maxcount -movieorient $movieorient -vertical_mov_mincount $vertical_mov_mincount -horizontal_mov_mincount $horizontal_mov_mincount
-$rmatrix = Get-RectangleMatrix_2 -ContainerWidth $disp.width -ContainerHeight $disp.height -mov_maxcount $mov_maxcount -movieorient $movieorient -vertical_mov_mincount $vertical_mov_mincount -horizontal_mov_mincount $horizontal_mov_mincount
-$mov_width = $rmatrix.Width
-$mov_height = $rmatrix.Height
-$h_tilecount = $rmatrix.Columns
-$v_tilecount = $rmatrix.Rows
-$mov_count = $rmatrix.Mov_Count
-"dbg:mov_count=$mov_count tilecount v/h=$v_tilecount/$h_tilecount mov_w/h=$mov_width/$mov_height xyoffset=$($disp.x_start),$($disp.y_start)"
-#>
-
 while ($loopflg){
 
-    #$mov = $movlistall[$movlist_pos..  ($movlist_pos + $mov_maxcount)]
     $mov = Get-CyclicSubArray $movlistall $movlist_pos $mov_count
-
 
     $movieorient = get-movie-orient -movie_list @($mov) -movie_orient_type $movie_orient_type_param
 
@@ -1026,27 +1002,10 @@ if ($chktitle){
 }
 
 # wait for vlc mainwindowhandle
-#  vlc title name uses metadata rather than filename if has one.
-#  we cannot use movie_title, 1 or more titles can be null.
-#  instead, we check mainwindowhandle!=0 to wait for vlc windows are opened
+#  VLC window titles may use metadata instead of the filename.
+#  Movie titles can be null, so we cannot rely on them.
+#  Instead, we check that MainWindowHandle is not zero to ensure VLC windows have opened.
 Write-Host "waiting for vlc windows..."
-<#
-do {
-    $i=0
-    $vlcarr|ForEach-Object{
-        $mainwindowhandle = (Get-Process -Id $_.id).MainWindowHandle
-        Write-verbose "dbg: $($_.id) $mainwindowhandle"
-        if ($mainwindowhandle -ne 0){
-            Write-Verbose "vlc $($_.id) mainwindowhandle found=$i"
-            $i++
-        } else {
-            Write-Verbose "vlc $($_.id) mainwindowhandle not found=$i"
-        }
-    }
-    Start-Sleep -Milliseconds 300
-}while ($i -lt $movcount)
-#>
-
 $vlcarr|ForEach-Object{
     do {
         $mainwindowhandle = (Get-Process -Id $_.id).MainWindowHandle
