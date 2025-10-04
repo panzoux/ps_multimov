@@ -760,6 +760,7 @@ function Get-RectangleMatrix_2 {
         $mov_count = $mov_maxcount
     } else {
         $mov_count = $h_tilecount * $v_tilecount
+        if ($mov_maxcount -lt $mov_count){$mov_count = $mov_maxcount} #行*列>全動画数の場合、全動画数を優先(同じ動画の表示を抑制)
     }
 
     # ディスプレイサイズを取得
@@ -824,11 +825,41 @@ function get-displaysize
     }
 }
 
+function get-movie-orient{
+    #guess movie orient
+    param (
+        $movie_list,$movie_orient_type
+    )
+
+    if ($movie_orient_type -eq [movieorienttype]::guess){
+        $h_mov_count = 0
+        $v_mov_count = 0
+        #$movie_list | Select-Object -First $mov_maxcount | ForEach-Object {
+        $movie_list | ForEach-Object {
+            $res = get-VideoResolution $_
+            if ([int]$res.A_フレーム幅 -gt [int]$res.A_フレーム高){
+                $h_mov_count++
+            } else {
+                $v_mov_count++
+            }
+            #"dbg: {1},{2} h={3} v={4}:{0}" -f $res.name,$res.A_フレーム幅,$res.A_フレーム高, $h_mov_count, $v_mov_count
+        }
+        if ($h_mov_count -ge $v_mov_count){
+            $movie_orient_type = [movieorienttype]::yoko
+        } else {
+            $movie_orient_type = [movieorienttype]::tate
+        }
+        write-host ("guessing movie orient ... horizontal,vertical={0},{1} => {2}" -f $h_mov_count,$v_mov_count,[movieorienttype].GetEnumName($movie_orient_type))
+    }
+    return $movie_orient_type
+}
+
 #endregion
 
 #region main
 <# multimov #>
 
+##### check param
 if ($fol -eq ""){
     Write-Warning "folder not specified"
     exit
@@ -843,8 +874,10 @@ if ($filter -eq "") {$filter="*.*"}
 $loopflg = $true
 $movlist_pos=0
 
-$mov_maxcount = 3
-$movieorient = [movieorienttype]::guess #0=guess 1=yoko 2=tate
+
+##### settings
+$mov_maxcount = 12
+$movie_orient_type_param = [movieorienttype]::guess #0=guess 1=yoko 2=tate
 $horizontal_mov_mincount = 6 #horizontal=yoko
 $vertical_mov_mincount = 1   #vertical=tate
 $h_tilecount = 0
@@ -854,9 +887,45 @@ $keys_next=@('N','Emter')
 $random=$false
 $random=$true
 
+
+##### vlc settings
+$vlcPath = "C:\Program Files\VideoLAN\VLC\vlc.exe"
+$vlcarg = @(
+    '--qt-minimal-view',
+    '--no-video-deco',
+    '--no-qt-video-autoresize',
+    '--qt-name-in-title',
+    '--qt-continue=0',
+    '--no-qt-updates-notif',
+    '--no-qt-recentplay',
+    '--loop',
+# not working (bug in vlc3?)
+    '--width=0',
+    '--height=0',
+    "--video-x=0",
+    "--video-y=0",
+# unusable. can't continue script
+#    '--no-embedded-video',
+# unusable. can't change position
+#    '--intf=d',
+#    '--dummy-quiet',
+# not working
+#    '--mmdevice-volume=0.100000',
+#    '--directx-volume=0.100000',
+#    '--waveout-volume=0.100000',
+#    '--volume=50',
+    '' # this blank is used to set movie file path
+)
+
+
+#####
+
 $movlistall = (,((Get-ChildItem $fol -file -Filter $filter).FullName))|Get-RandomSort -random $random
 
-#guess movie orient from movlistall
+if ($movlistall.count -lt $mov_maxcount){$mov_count = $movlistall.count} else {$mov_count = $mov_maxcount}
+
+#guess movie orient
+<#
 if ($movieorient -eq [movieorienttype]::guess){
     $h_mov_count = 0
     $v_mov_count = 0
@@ -876,91 +945,10 @@ if ($movieorient -eq [movieorienttype]::guess){
     }
     write-host ("guessing movie orient ... horizontal,vertical={0},{1} => {2}" -f $h_mov_count,$v_mov_count,[movieorienttype].GetEnumName($movieorient))
 }
+#>
 
 <#
-switch ($movieorient){
-    ([movieorienttype]::yoko) {
-        $mov_count = [math]::Ceiling($mov_maxcount/$vertical_mov_mincount) * $vertical_mov_mincount
-    }
-    ([movieorienttype]::tate) {
-        $mov_count = [math]::Ceiling($mov_maxcount/$horizontal_mov_mincount) * $horizontal_mov_mincount
-    }
-}
-
-"dbg: 0 mov_count=$mov_count mov_maxcount=$mov_maxcount movieorient=$movieorient"
-#pause
-
-switch ($movieorient){
-    ([movieorienttype]::yoko) {
-	    $v_tilecount = [Math]::Ceiling([Math]::Sqrt($mov_count / 2))
-        if ($v_tilecount -lt $vertical_mov_mincount){
-            $v_tilecount = $vertical_mov_mincount
-        }
-
-        $h_tilecount = [Math]::Ceiling($mov_count / $v_tilecount)
-
-        if ($h_tilecount -eq 1){
-            if ($v_tilecount -gt $mov_maxcount){
-                $v_tilecount = $mov_maxcount
-                $mov_count = $mov_maxcount
-            }
-        } else {
-            $mov_count = $h_tilecount * $v_tilecount
-        }
-
-    }
-    ([movieorienttype]::tate) {
-	    $h_tilecount = [Math]::Ceiling([Math]::Sqrt($mov_count / 2))
-        if ($h_tilecount -lt $horizontal_mov_mincount){
-            $h_tilecount = $horizontal_mov_mincount
-        }
-
-        $v_tilecount = [Math]::Ceiling($mov_count / $h_tilecount)
-
-        if ($v_tilecount -eq 1){
-            if ($h_tilecount -gt $mov_maxcount){
-                $h_tilecount = $mov_maxcount
-                $mov_count = $mov_maxcount
-            }
-        } else {
-            $mov_count = $h_tilecount * $v_tilecount
-        }
-    }
-}
-
-if ($h_tilecount -eq 1){
-    if ($v_tilecount -gt $mov_maxcount){
-        $v_tilecount = $mov_maxcount
-        $mov_count = $mov_maxcount
-    }
-} else {
-    $mov_count = $h_tilecount * $v_tilecount
-}
-if ($v_tilecount -eq 1){
-    if ($h_tilecount -gt $mov_maxcount){
-        $h_tilecount = $mov_maxcount
-        $mov_count = $mov_maxcount
-    }
-} else {
-    $mov_count = $h_tilecount * $v_tilecount
-}
-
-$disp = get-displaysize
-$width = $disp.width
-$height = $disp.height
-$x_start = $disp.x_start
-$y_start = $disp.y_start
-
-"dbg: 0 mov_count=$mov_count mov_maxcount=$mov_maxcount movieorient=$movieorient"
-
-#$mov = $movlistall | Select-Object -First $mov_maxcount
-
-# get movie width,height from display size, h/v tilecount
-$mov_width = [Math]::Ceiling(($width + ($winborder * 2 * $h_tilecount)) / $h_tilecount)
-$mov_height = [Math]::Ceiling(($height + ($winborder * $v_tilecount)) / $v_tilecount)
-
-"dbg:mov_count=$mov_count tilecount v/h=$v_tilecount/$h_tilecount mov_w/h=$mov_width/$mov_height"
-#>
+$movieorient = get-movie-orient -movie_list @($movlistall | Select-Object -First $mov_maxcount) -movie_orient_type $movieorient
 
 $disp = get-displaysize
 $x_start = $disp.x_start
@@ -975,6 +963,7 @@ $h_tilecount = $rmatrix.Columns
 $v_tilecount = $rmatrix.Rows
 $mov_count = $rmatrix.Mov_Count
 "dbg:mov_count=$mov_count tilecount v/h=$v_tilecount/$h_tilecount mov_w/h=$mov_width/$mov_height xyoffset=$($disp.x_start),$($disp.y_start)"
+#>
 
 while ($loopflg){
 
@@ -982,34 +971,23 @@ while ($loopflg){
     $mov = Get-CyclicSubArray $movlistall $movlist_pos $mov_count
 
 
-    #####
-    $vlcPath = "C:\Program Files\VideoLAN\VLC\vlc.exe"
-    $vlcarg = @(
-        '--qt-minimal-view',
-        '--no-video-deco',
-        '--no-qt-video-autoresize',
-        '--qt-name-in-title',
-        '--qt-continue=0',
-        '--no-qt-updates-notif',
-        '--no-qt-recentplay',
-        '--loop',
-    # not working (bug in vlc3?)
-        '--width=0',
-        '--height=0',
-        "--video-x=0",
-        "--video-y=0",
-    # unusable. can't continue script
-    #    '--no-embedded-video',
-    # unusable. can't change position
-    #    '--intf=d',
-    #    '--dummy-quiet',
-    # not working
-    #    '--mmdevice-volume=0.100000',
-    #    '--directx-volume=0.100000',
-    #    '--waveout-volume=0.100000',
-    #    '--volume=50',
-        '' # this blank is used to set movie file path
-    )
+    $movieorient = get-movie-orient -movie_list @($mov) -movie_orient_type $movie_orient_type_param
+
+    $disp = get-displaysize
+    $x_start = $disp.x_start
+    $y_start = $disp.y_start
+    $winborder = $disp.winborder
+
+    #$rmatrix = Get-RectangleMatrix_1 -ContainerWidth $disp.width -ContainerHeight $disp.height -mov_maxcount $mov_maxcount -movieorient $movieorient -vertical_mov_mincount $vertical_mov_mincount -horizontal_mov_mincount $horizontal_mov_mincount
+    $rmatrix = Get-RectangleMatrix_2 -ContainerWidth $disp.width -ContainerHeight $disp.height -mov_maxcount $mov_count -movieorient $movieorient -vertical_mov_mincount $vertical_mov_mincount -horizontal_mov_mincount $horizontal_mov_mincount
+    $mov_width = $rmatrix.Width
+    $mov_height = $rmatrix.Height
+    $h_tilecount = $rmatrix.Columns
+    $v_tilecount = $rmatrix.Rows
+    $mov_count = $rmatrix.Mov_Count
+    "dbg:mov_count=$mov_count tilecount v/h=$v_tilecount/$h_tilecount mov_w/h=$mov_width/$mov_height xyoffset=$($disp.x_start),$($disp.y_start)"
+
+
     $vlcarr = [System.Collections.ArrayList]::new()
 
     killprocess $vlcPath
