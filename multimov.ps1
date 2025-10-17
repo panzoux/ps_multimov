@@ -465,47 +465,24 @@ function get-windowrect($id){
 }
 #endregion
 
-<#
-function Get-RandomSort{
-    param(  
-    [Parameter(
-        Mandatory=$true, 
-        ValueFromPipeline=$true,
-        ValueFromPipelineByPropertyName=$true)
-    ]
-    [String[]]$arr,
-    [boolean]$random
-    ) 
+function Stop-ProcessByPath {
+    param(
+        [Parameter(Mandatory=$true, ValueFromPipeline=$true)]
+        [string]$ProcessPath
+    )
     process {
-        $cpyarr = [System.Collections.ArrayList]::new()
-        $retarr = [System.Collections.ArrayList]::new()
+        # extract executable base name if a path was given, else use as-is
+        $baseName = [System.IO.Path]::GetFileNameWithoutExtension($ProcessPath)
+        if ([string]::IsNullOrWhiteSpace($baseName)) { return }
 
-        $arr|ForEach-Object{
-            [void]$cpyarr.add($_)
+        try {
+            Get-Process -Name $baseName -ErrorAction SilentlyContinue |
+                Stop-Process -ErrorAction SilentlyContinue
+        } catch {
+            # best-effort fallback
+            Stop-Process -Name $baseName -ErrorAction SilentlyContinue
         }
-
-        if ($random){
-            do {
-                $i =  $cpyarr.count - 1
-                if ($i -gt 0){
-                    $rnd = get-random -Minimum 0 -Maximum $i
-                } else {
-                    $rnd = 0
-                }
-                $retarr += $cpyarr[$rnd]
-                $cpyarr.RemoveAt($rnd)
-                $i--
-            } while ($i -ge 0)
-        } else {
-            $retarr=$cpyarr
-        }
-        return $retarr
     }
-}
-#>
-
-function killprocess($processpath){
-    stop-process -name (Get-ChildItem $processpath).BaseName -ErrorAction SilentlyContinue
 }
 
 function get-VideoResolution($source){
@@ -941,7 +918,6 @@ $vlcarg = @(
 
 #####
 
-#$movlistall = (,((Get-ChildItem $fol -file -Filter $filter).FullName))|Get-RandomSort -random $random
 $movlistall = (Get-ChildItem $fol -file -Filter $filter).FullName
 if ($random){
     $movlistall = $movlistall|Get-Random -Count $movlistall.count
@@ -969,10 +945,9 @@ while ($loopflg){
     $mov_count = $rmatrix.Mov_Count
     "dbg:mov_count=$mov_count tilecount v/h=$v_tilecount/$h_tilecount mov_w/h=$mov_width/$mov_height xyoffset=$($disp.x_start),$($disp.y_start)"
 
-
     $vlcarr = [System.Collections.ArrayList]::new()
 
-    killprocess $vlcPath
+    Stop-ProcessByPath $vlcPath
 
     $mov|ForEach-Object{
         $vlcarg[$vlcarg.count-1]="""$_"""
