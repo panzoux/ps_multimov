@@ -465,6 +465,7 @@ function get-windowrect($id){
 }
 #endregion
 
+<#
 function Get-RandomSort{
     param(  
     [Parameter(
@@ -501,6 +502,7 @@ function Get-RandomSort{
         return $retarr
     }
 }
+#>
 
 function killprocess($processpath){
     stop-process -name (Get-ChildItem $processpath).BaseName -ErrorAction SilentlyContinue
@@ -939,7 +941,11 @@ $vlcarg = @(
 
 #####
 
-$movlistall = (,((Get-ChildItem $fol -file -Filter $filter).FullName))|Get-RandomSort -random $random
+#$movlistall = (,((Get-ChildItem $fol -file -Filter $filter).FullName))|Get-RandomSort -random $random
+$movlistall = (Get-ChildItem $fol -file -Filter $filter).FullName
+if ($random){
+    $movlistall = $movlistall|Get-Random -Count $movlistall.count
+}
 
 if ($movlistall.count -lt $mov_maxcount){$mov_count = $movlistall.count} else {$mov_count = $mov_maxcount}
 
