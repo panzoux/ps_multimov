@@ -5,7 +5,7 @@
 .DESCRIPTION
     指定フォルダ内の動画ファイルを取得し、VLCメディアプレイヤーでタイル状に並べて再生します。
     動画の向き（横/縦）を自動判定し、ウィンドウサイズ・位置を自動調整します。
-    キー操作で終了や次の動画セットへの切り替えが可能です。
+    キー操作で終了(q)や次の動画セットへの切り替え(n)が可能です。
 
 .PARAMETER fol
     動画ファイルが格納されているフォルダのパス
@@ -1024,7 +1024,7 @@ $vlcarr|ForEach-Object{
         "[$key]"
         if ($key -in $keys_exit) {
             Write-Host "quitting.."
-            killprocess $vlcPath
+            Stop-ProcessByPath $vlcPath
             $playflg=$false
             $loopflg=$false
         }
