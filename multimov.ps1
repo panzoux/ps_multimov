@@ -771,16 +771,9 @@ function Get-RectangleMatrix_2 {
     switch ($movieorient) {
         ([movieorienttype]::yoko) {
             $mov_count = [math]::Ceiling($mov_maxcount / $vertical_mov_mincount) * $vertical_mov_mincount
-            $v_tilecount = [Math]::Ceiling([Math]::Sqrt($mov_count / 2))
-            if ($v_tilecount -lt $vertical_mov_mincount) {
-                $v_tilecount = $vertical_mov_mincount
-            }
-            $h_tilecount = [Math]::Ceiling($mov_count / $v_tilecount)
-
-            $mov_count = [math]::Ceiling($mov_maxcount / $vertical_mov_mincount) * $vertical_mov_mincount
             #$h_tilecount = [Math]::Ceiling([Math]::Sqrt($mov_count / 2))
-            #$h_tilecount = [Math]::Ceiling([Math]::Sqrt($mov_count *1.5)) # 1.5 = y720/x480 (approximate movie aspect ratio)
-            $h_tilecount = [Math]::Ceiling([Math]::Sqrt($mov_count / $AverageHorizontalRatio * $display_aspect_ratio))
+            #$h_tilecount = [Math]::Ceiling([Math]::Sqrt($mov_count / $AverageHorizontalRatio * $display_aspect_ratio))
+            $h_tilecount = [Math]::Round([Math]::Sqrt($mov_count / $AverageHorizontalRatio * $display_aspect_ratio))
             if ($h_tilecount -lt $horizontal_mov_mincount) {
                 $h_tilecount = $horizontal_mov_mincount
             }
@@ -789,14 +782,12 @@ function Get-RectangleMatrix_2 {
         ([movieorienttype]::tate) {
             $mov_count = [math]::Ceiling($mov_maxcount / $horizontal_mov_mincount) * $horizontal_mov_mincount
             #$h_tilecount = [Math]::Ceiling([Math]::Sqrt($mov_count / 2))
-            #$h_tilecount = [Math]::Ceiling([Math]::Sqrt($mov_count *1.5)) # 1.5 = y720/x480 (approximate movie aspect ratio)
-            #$h_tilecount = [Math]::Ceiling([Math]::Sqrt($mov_count * $AverageHorizontalRatio * $display_aspect_ratio))
-            $h_tilecount = [Math]::Ceiling([Math]::Sqrt($mov_count / $AverageVerticalRatio * $display_aspect_ratio))
+            #$h_tilecount = [Math]::Ceiling([Math]::Sqrt($mov_count / $AverageVerticalRatio * $display_aspect_ratio))
+            $h_tilecount = [Math]::Round([Math]::Sqrt($mov_count / $AverageVerticalRatio * $display_aspect_ratio))
             if ($h_tilecount -lt $horizontal_mov_mincount) {
                 $h_tilecount = $horizontal_mov_mincount
             }
             $v_tilecount = [Math]::Ceiling($mov_count / $h_tilecount)
-
         }
     }
 
@@ -817,7 +808,7 @@ function Get-RectangleMatrix_2 {
     $mov_height = [Math]::Ceiling(($height + ($winborder * $v_tilecount)) / $v_tilecount)
 
     # デバッグ情報
-    write-host "dbg: movieorient=$movieorient mov_count=$mov_count tilecount v/h=$v_tilecount/$h_tilecount mov_w/h=$mov_width/$mov_height"
+    Write-Verbose "dbg: movieorient=$movieorient mov_count=$mov_count tilecount v/h=$v_tilecount/$h_tilecount mov_w/h=$mov_width/$mov_height"
 
     # 結果を返す
     return [PSCustomObject]@{
@@ -931,7 +922,8 @@ function get-movie-orient{
 
         if ($h -eq 0) { continue }
 
-        $ratio = [double]$w / [double]$h
+        #$ratio = [double]$w / [double]$h
+        $ratio = [int]$w / [int]$h
 
         if ($w -gt $h) {
             $h_mov_count++
@@ -942,8 +934,8 @@ function get-movie-orient{
         }
     }
 
-    $avgH = if ($h_mov_count -gt 0) { [math]::Round($sumRatioH / $h_mov_count, 4) } else { $null }
-    $avgV = if ($v_mov_count -gt 0) { [math]::Round($sumRatioV / $v_mov_count, 4) } else { $null }
+    $avgH = if ($h_mov_count -gt 0) { [math]::Round($sumRatioH / $h_mov_count, 4) } else { 1 }
+    $avgV = if ($v_mov_count -gt 0) { [math]::Round($sumRatioV / $v_mov_count, 4) } else { 1 }
 
     # return averages via byref parameters if provided
     if ($AverageHorizontal -is [ref]) { $AverageHorizontal.Value = $avgH }
@@ -1054,7 +1046,25 @@ $v_tilecount = 0
 $avgH = 0
 $avgV = 0
 
-$movlistall = (Get-ChildItem $fol -file -Filter $filter).FullName
+# only enumerate common video extensions (unless a specific filter is provided)
+$videoExtensions = @('*.mp4','*.mkv','*.avi','*.mov','*.wmv','*.flv','*.webm','*.m4v','*.mpeg','*.mpg','*.ts','*.m2ts','*.3gp')
+
+if ($PSBoundParameters.ContainsKey('filter') -and -not [string]::IsNullOrWhiteSpace($filter) -and $filter -ne '*.*') {
+    $patterns = @($filter)
+} else {
+    $patterns = $videoExtensions
+}
+
+$movlistall = forEach ($p in $patterns) {
+    Get-ChildItem -Path $fol -File -Filter $p -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName
+}
+$movlistall = $movlistall | Sort-Object -Unique
+
+if ($movlistall.count -eq 0){
+    Write-Warning "No movie files found in $fol"
+    exit
+}
+
 if ($random){
     $movlistall = $movlistall|Get-Random -Count $movlistall.count
 }
@@ -1074,7 +1084,51 @@ while ($continueLoop){
     $winborder = $disp.winborder
 
     #$rmatrix = Get-RectangleMatrix_1 -ContainerWidth $disp.width -ContainerHeight $disp.height -mov_maxcount $mov_maxcount -movieorient $movieorient -vertical_mov_mincount $vertical_mov_mincount -horizontal_mov_mincount $horizontal_mov_mincount
-    $rmatrix = Get-RectangleMatrix_2 -ContainerWidth $disp.width -ContainerHeight $disp.height -mov_maxcount $mov_count -movieorient $movieorient -vertical_mov_mincount $vertical_mov_mincount -horizontal_mov_mincount $horizontal_mov_mincount
+    #$rmatrix = Get-RectangleMatrix_2 -ContainerWidth $disp.width -ContainerHeight $disp.height -mov_maxcount $mov_count -movieorient $movieorient -vertical_mov_mincount $vertical_mov_mincount -horizontal_mov_mincount $horizontal_mov_mincount
+
+    # select the matrix with tilecount closer to mov_count
+    $rmatrix_v = Get-RectangleMatrix_2 -ContainerWidth $disp.width -ContainerHeight $disp.height -mov_maxcount $mov_count -movieorient ([movieorienttype]::yoko).value__ -vertical_mov_mincount $vertical_mov_mincount -horizontal_mov_mincount $horizontal_mov_mincount
+    $rmatrix_h = Get-RectangleMatrix_2 -ContainerWidth $disp.width -ContainerHeight $disp.height -mov_maxcount $mov_count -movieorient ([movieorienttype]::tate).value__ -vertical_mov_mincount $vertical_mov_mincount -horizontal_mov_mincount $horizontal_mov_mincount
+    $diff_movcount_v = [math]::Abs($rmatrix_v.Columns*$rmatrix_v.Rows - $mov_count)
+    $diff_movcount_h = [math]::Abs($rmatrix_h.Columns*$rmatrix_h.Rows - $mov_count)
+    if ($diff_movcount_v -eq $diff_movcount_h){
+        # if both diffs are equal, select the one with larger area      
+        $area_v = $rmatrix_v.Width * $rmatrix_v.Height
+        $area_h = $rmatrix_h.Width * $rmatrix_h.Height
+        if ($area_v -eq $area_h){
+            # if both areas are equal, select the one with aspect ratio closer to average
+            [double]$avgRatio = 0.0
+            if ($movieorient -eq [movieorienttype]::yoko){
+                $avgRatio = $avgH
+            } else {
+                $avgRatio = $avgV
+            }
+            [double]$diff_v = [math]::Abs( ($rmatrix_v.Width / $rmatrix_v.Height) - $avgRatio )
+            [double]$diff_h = [math]::Abs( ($rmatrix_h.Width / $rmatrix_h.Height) - $avgRatio )
+            if ($diff_v -le $diff_h){
+                $rmatrix = $rmatrix_v
+                write-verbose ("dbg: selected v-oriented matrix by aspect ratio: diff_v=$diff_v diff_h=$diff_h")
+            } else {
+                $rmatrix = $rmatrix_h
+                write-verbose ("dbg: selected h-oriented matrix by aspect ratio: diff_v=$diff_v diff_h=$diff_h")
+            }
+        } elseif ($area_v -gt $area_h){
+            $rmatrix = $rmatrix_v
+            write-verbose ("dbg: selected v-oriented matrix by area: area_v=$area_v area_h=$area_h")
+        } else {
+            $rmatrix = $rmatrix_h
+            write-verbose ("dbg: selected h-oriented matrix by area: area_v=$area_v area_h=$area_h")
+        }
+    } elseif ($diff_movcount_v -lt $diff_movcount_h){
+        $rmatrix = $rmatrix_v
+        write-verbose ("dbg: selected v-oriented matrix: diff_movcount_v=$diff_movcount_v diff_movcount_h=$diff_movcount_h")
+    } else {
+        $rmatrix = $rmatrix_h
+        write-verbose ("dbg: selected h-oriented matrix: diff_movcount_v=$diff_movcount_v diff_movcount_h=$diff_movcount_h")
+    }
+    write-verbose ("dbg: computed matrix v/h={0}/{1} for mov_count={2}" -f $rmatrix.Rows, $rmatrix.Columns, $mov_count)
+
+    # get movie window size and tilecount
     $mov_width = $rmatrix.Width
     $mov_height = $rmatrix.Height
     $h_tilecount = $rmatrix.Columns

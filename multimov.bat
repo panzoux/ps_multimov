@@ -1,1 +1,1 @@
-powershell -command %~dpn0.ps1 "'%*'"
+powershell -NoProfile -command %~dpn0.ps1 "'%*'"
