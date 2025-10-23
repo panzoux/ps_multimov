@@ -778,6 +778,10 @@ function Get-RectangleMatrix_2 {
                 $h_tilecount = $horizontal_mov_mincount
             }
             $v_tilecount = [Math]::Ceiling($mov_count / $h_tilecount)
+            if ($v_tilecount -lt $vertical_mov_mincount) {
+                $v_tilecount = $vertical_mov_mincount
+                $h_tilecount = [Math]::Ceiling($mov_count / $v_tilecount)
+            }
         }
         ([movieorienttype]::tate) {
             $mov_count = [math]::Ceiling($mov_maxcount / $horizontal_mov_mincount) * $horizontal_mov_mincount
@@ -788,6 +792,10 @@ function Get-RectangleMatrix_2 {
                 $h_tilecount = $horizontal_mov_mincount
             }
             $v_tilecount = [Math]::Ceiling($mov_count / $h_tilecount)
+            if ($v_tilecount -lt $vertical_mov_mincount) {
+                $v_tilecount = $vertical_mov_mincount
+                $h_tilecount = [Math]::Ceiling($mov_count / $v_tilecount)
+            }
         }
     }
 
@@ -886,7 +894,9 @@ function get-movie-orient{
         $movie_list,
         $movie_orient_type,
         [ref]$AverageHorizontal = $null,
-        [ref]$AverageVertical   = $null
+        [ref]$AverageVertical   = $null,
+        [ref]$SumAreaHorizontal = $null,
+        [ref]$SumAreaVertical   = $null
     )
 
     # guard: sanitize inputs
@@ -894,11 +904,17 @@ function get-movie-orient{
         # nothing to analyze, set defaults and return requested type or guess
         $avgH = 16.0/9.0
         $avgV = 9.0/16.0
+        $sumAreaH = 1
+        $sumAreaV = 1
         $movie_orient_type_default = [movieorienttype]::yoko
         if ($AverageHorizontal -is [ref]) { $AverageHorizontal.Value = $avgH }
         if ($AverageVertical   -is [ref]) { $AverageVertical.Value   = $avgV }
+        if ($SumAreaHorizontal -is [ref]) { $SumAreaHorizontal.Value = $sumAreaH }
+        if ($SumAreaVertical   -is [ref]) { $SumAreaVertical.Value   = $sumAreaV }
         $global:AverageHorizontalRatio = $avgH
         $global:AverageVerticalRatio   = $avgV
+        $global:SumAreaHorizontal = $sumAreaH
+        $global:SumAreaVertical   = $sumAreaV
         if ($movie_orient_type -eq [movieorienttype]::guess){
             Write-Host ("no movies to analyze, defaulting movie orient to {0}  avgRatioH={1} avgRatioV={2}" -f $movie_orient_type_default.ToString(), $avgH, $avgV)
             $movie_orient_type = $movie_orient_type_default
@@ -912,6 +928,8 @@ function get-movie-orient{
     $v_mov_count = 0
     $sumRatioH = 0.0
     $sumRatioV = 0.0
+    $sumAreaH = 0
+    $sumAreaV = 0
 
     foreach ($m in $movie_list) {
         $res = Get-VideoResolution $m | Select-Object -First 1
@@ -928,10 +946,15 @@ function get-movie-orient{
         if ($w -gt $h) {
             $h_mov_count++
             $sumRatioH += $ratio
+            #$sumAreaH += $w * $h
+            $sumAreaH += 100 * (100 * $h / $w) # 横長動画の面積は横幅基準で正規化して加算
         } else {
             $v_mov_count++
             $sumRatioV += $ratio
+            #$sumAreaV += $w * $h
+            $sumAreaV += (100 * $w / $h) * 100 # 縦長動画の面積は縦幅基準で正規化して加算
         }
+        #Write-Verbose ("movie: {0}  res={1}x{2} ratio={3}  h_mov_count={4} v_mov_count={5}" -f $m, $w, $h, [math]::Round($ratio,4), $h_mov_count, $v_mov_count)
     }
 
     $avgH = if ($h_mov_count -gt 0) { [math]::Round($sumRatioH / $h_mov_count, 4) } else { 1 }
@@ -940,10 +963,15 @@ function get-movie-orient{
     # return averages via byref parameters if provided
     if ($AverageHorizontal -is [ref]) { $AverageHorizontal.Value = $avgH }
     if ($AverageVertical   -is [ref]) { $AverageVertical.Value   = $avgV }
+    if ($SumAreaHorizontal -is [ref]) { $SumAreaHorizontal.Value = $sumAreaH }
+    if ($SumAreaVertical   -is [ref]) { $SumAreaVertical.Value   = $sumAreaV }
 
     $global:AverageHorizontalRatio = $avgH
     $global:AverageVerticalRatio   = $avgV
+    $global:SumAreaHorizontal = $sumAreaH
+    $global:SumAreaVertical   = $sumAreaV
 
+    # decide movie orient type if set to guess
     if ($movie_orient_type -eq [movieorienttype]::guess){
         if ($h_mov_count -ge $v_mov_count){
             $movie_orient_type = [movieorienttype]::yoko
@@ -981,7 +1009,7 @@ $vertical_mov_mincount = $VerticalMinCount
 
 
 ##### check param
-Write-Verbose "dbg:`n param fol=$fol`n filter=$filter`n mov_maxcount=$mov_maxcount`n movie_orient_type_param=$movie_orient_type_param`n vertical_mov_mincount=$vertical_mov_mincount`n horizontal_mov_mincount=$horizontal_mov_mincount` random=$random`n loop=$loop"
+Write-Verbose "dbg:`n param fol=$fol`n filter=$filter`n mov_maxcount=$mov_maxcount`n movie_orient_type_param=$movie_orient_type_param`n vertical_mov_mincount=$vertical_mov_mincount`n horizontal_mov_mincount=$horizontal_mov_mincount` random=$random`n noloop=$noloop"
 
 if ($fol -eq ""){
     Write-Warning "folder not specified"
@@ -1045,6 +1073,8 @@ $h_tilecount = 0
 $v_tilecount = 0
 $avgH = 0
 $avgV = 0
+$sumAreaH = 0
+$sumAreaV = 0
 
 # only enumerate common video extensions (unless a specific filter is provided)
 $videoExtensions = @('*.mp4','*.mkv','*.avi','*.mov','*.wmv','*.flv','*.webm','*.m4v','*.mpeg','*.mpg','*.ts','*.m2ts','*.3gp')
@@ -1076,7 +1106,7 @@ while ($continueLoop){
     $mov = Get-CyclicSubArray $movlistall $movlist_pos $mov_count
 
     #$movieorient = get-movie-orient -movie_list @($mov) -movie_orient_type $movie_orient_type_param
-    $movieorient = get-movie-orient -movie_list @($mov) -movie_orient_type $movie_orient_type_param -AverageHorizontal ([ref]$avgH) -AverageVertical ([ref]$avgV)
+    $movieorient = get-movie-orient -movie_list @($mov) -movie_orient_type $movie_orient_type_param -AverageHorizontal ([ref]$avgH) -AverageVertical ([ref]$avgV) -SumAreaHorizontal ([ref]$sumAreaH) -SumAreaVertical ([ref]$sumAreaV)
  
     $disp = get-displaysize
     $x_start = $disp.x_start
@@ -1087,44 +1117,56 @@ while ($continueLoop){
     #$rmatrix = Get-RectangleMatrix_2 -ContainerWidth $disp.width -ContainerHeight $disp.height -mov_maxcount $mov_count -movieorient $movieorient -vertical_mov_mincount $vertical_mov_mincount -horizontal_mov_mincount $horizontal_mov_mincount
 
     # select the matrix with tilecount closer to mov_count
-    $rmatrix_v = Get-RectangleMatrix_2 -ContainerWidth $disp.width -ContainerHeight $disp.height -mov_maxcount $mov_count -movieorient ([movieorienttype]::yoko).value__ -vertical_mov_mincount $vertical_mov_mincount -horizontal_mov_mincount $horizontal_mov_mincount
-    $rmatrix_h = Get-RectangleMatrix_2 -ContainerWidth $disp.width -ContainerHeight $disp.height -mov_maxcount $mov_count -movieorient ([movieorienttype]::tate).value__ -vertical_mov_mincount $vertical_mov_mincount -horizontal_mov_mincount $horizontal_mov_mincount
+    $rmatrix_v = Get-RectangleMatrix_2 -ContainerWidth $disp.width -ContainerHeight $disp.height -mov_maxcount $mov_count -movieorient ([movieorienttype]::tate).value__ -vertical_mov_mincount $vertical_mov_mincount -horizontal_mov_mincount $horizontal_mov_mincount
+    $rmatrix_h = Get-RectangleMatrix_2 -ContainerWidth $disp.width -ContainerHeight $disp.height -mov_maxcount $mov_count -movieorient ([movieorienttype]::yoko).value__ -vertical_mov_mincount $vertical_mov_mincount -horizontal_mov_mincount $horizontal_mov_mincount
     $diff_movcount_v = [math]::Abs($rmatrix_v.Columns*$rmatrix_v.Rows - $mov_count)
     $diff_movcount_h = [math]::Abs($rmatrix_h.Columns*$rmatrix_h.Rows - $mov_count)
-    if ($diff_movcount_v -eq $diff_movcount_h){
-        # if both diffs are equal, select the one with larger area      
-        $area_v = $rmatrix_v.Width * $rmatrix_v.Height
-        $area_h = $rmatrix_h.Width * $rmatrix_h.Height
-        if ($area_v -eq $area_h){
-            # if both areas are equal, select the one with aspect ratio closer to average
-            [double]$avgRatio = 0.0
-            if ($movieorient -eq [movieorienttype]::yoko){
-                $avgRatio = $avgH
-            } else {
-                $avgRatio = $avgV
-            }
-            [double]$diff_v = [math]::Abs( ($rmatrix_v.Width / $rmatrix_v.Height) - $avgRatio )
-            [double]$diff_h = [math]::Abs( ($rmatrix_h.Width / $rmatrix_h.Height) - $avgRatio )
-            if ($diff_v -le $diff_h){
+
+    if (($sumAreaH -eq $sumAreaV) -or ($sumAreaH -lt 1) -or ($sumAreaV -lt 1)){
+        # if both sum areas are equal (or invalid), select by movcount diff
+        if ($diff_movcount_v -eq $diff_movcount_h){
+            # if both diffs are equal, select the one with larger area      
+            $area_v = $rmatrix_v.Width * $rmatrix_v.Height
+            $area_h = $rmatrix_h.Width * $rmatrix_h.Height
+            if ($area_v -eq $area_h){
+                # if both areas are equal, select the one with aspect ratio closer to average
+                [double]$avgRatio = 0.0
+                if ($movieorient -eq [movieorienttype]::yoko){
+                    $avgRatio = $avgH
+                } else {
+                    $avgRatio = $avgV
+                }
+                [double]$diff_v = [math]::Abs( ($rmatrix_v.Width / $rmatrix_v.Height) - $avgRatio )
+                [double]$diff_h = [math]::Abs( ($rmatrix_h.Width / $rmatrix_h.Height) - $avgRatio )
+                if ($diff_v -le $diff_h){
+                    $rmatrix = $rmatrix_v
+                    write-verbose ("dbg: selected v-oriented matrix by aspect ratio: diff_v=$diff_v diff_h=$diff_h")
+                } else {
+                    $rmatrix = $rmatrix_h
+                    write-verbose ("dbg: selected h-oriented matrix by aspect ratio: diff_v=$diff_v diff_h=$diff_h")
+                }
+            } elseif ($area_v -gt $area_h){
                 $rmatrix = $rmatrix_v
-                write-verbose ("dbg: selected v-oriented matrix by aspect ratio: diff_v=$diff_v diff_h=$diff_h")
+                write-verbose ("dbg: selected v-oriented matrix by area: area_v=$area_v area_h=$area_h")
             } else {
                 $rmatrix = $rmatrix_h
-                write-verbose ("dbg: selected h-oriented matrix by aspect ratio: diff_v=$diff_v diff_h=$diff_h")
+                write-verbose ("dbg: selected h-oriented matrix by area: area_v=$area_v area_h=$area_h")
             }
-        } elseif ($area_v -gt $area_h){
+        } elseif ($diff_movcount_v -lt $diff_movcount_h){
             $rmatrix = $rmatrix_v
-            write-verbose ("dbg: selected v-oriented matrix by area: area_v=$area_v area_h=$area_h")
+            write-verbose ("dbg: selected v-oriented matrix: diff_movcount_v=$diff_movcount_v diff_movcount_h=$diff_movcount_h")
         } else {
             $rmatrix = $rmatrix_h
-            write-verbose ("dbg: selected h-oriented matrix by area: area_v=$area_v area_h=$area_h")
+            write-verbose ("dbg: selected h-oriented matrix: diff_movcount_v=$diff_movcount_v diff_movcount_h=$diff_movcount_h")
         }
-    } elseif ($diff_movcount_v -lt $diff_movcount_h){
-        $rmatrix = $rmatrix_v
-        write-verbose ("dbg: selected v-oriented matrix: diff_movcount_v=$diff_movcount_v diff_movcount_h=$diff_movcount_h")
-    } else {
+    } elseif ($sumAreaH -gt $sumAreaV){
+        # if horizontal sum area is larger, prefer h-oriented matrix
         $rmatrix = $rmatrix_h
-        write-verbose ("dbg: selected h-oriented matrix: diff_movcount_v=$diff_movcount_v diff_movcount_h=$diff_movcount_h")
+        write-verbose ("dbg: selected h-oriented matrix by sum area: sumAreaH=$sumAreaH sumAreaV=$sumAreaV")
+    } else {
+        # if vertical sum area is larger, prefer v-oriented matrix
+        $rmatrix = $rmatrix_v
+        write-verbose ("dbg: selected v-oriented matrix by sum area: sumAreaH=$sumAreaH sumAreaV=$sumAreaV")
     }
     write-verbose ("dbg: computed matrix v/h={0}/{1} for mov_count={2}" -f $rmatrix.Rows, $rmatrix.Columns, $mov_count)
 
