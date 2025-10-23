@@ -23,8 +23,34 @@
 
     [CmdletBinding()]
 param(
+    #
+    [Parameter(Mandatory=$false)]
     [String]$fol,
-    [String]$filter
+    #
+    [Parameter(Mandatory=$false)]
+    [String]$filter = '*.*',
+    #
+    [ValidateSet('guess','yoko','tate')]
+    [string]$movieorient,
+    #
+    [Alias('MovMaxCount')]
+    [Parameter(Mandatory=$false)]
+    [ValidateRange(1,16)]
+    [int]$mov_maxcount = 12,
+    #
+    [Parameter(Mandatory=$false)]
+    [ValidateRange(1,8)]
+    [int]$HorizontalMinCount = 1,
+    #
+    [Parameter(Mandatory=$false)]
+    [ValidateRange(1,8)]
+    [int]$VerticalMinCount   = 1,
+    #
+    [Parameter(Mandatory=$false)]
+    [switch]$Random,
+    #
+    [Parameter(Mandatory=$false)]
+    [switch]$NoLoop
 )
 
 enum movieorienttype {
@@ -32,7 +58,6 @@ enum movieorienttype {
     yoko  = 1
     tate  = 2
 }
-
 
 Add-Type -AssemblyName System.Windows.Forms
 
@@ -98,13 +123,15 @@ https://stackoverflow.com/questions/54236696/how-to-capture-global-keystrokes-wi
 
     Add-Type -TypeDefinition $code -ReferencedAssemblies System.Windows.Forms -PassThru | Out-Null
 
-#while ($true) {
-#    $key = [System.Windows.Forms.Keys][KeyLogger.Program]::WaitForKey()
-#    if ($key -eq "X") {
-#        Write-Host "Do something now."
-#    }
-#    start-sleep -Milliseconds 300
-#}
+<#
+while ($true) {
+    $key = [System.Windows.Forms.Keys][KeyLogger.Program]::WaitForKey()
+    if ($key -eq "X") {
+        Write-Host "Do something now."
+    }
+    start-sleep -Milliseconds 300
+}
+#>
 
 function Get-TaskBarDimensions {
     param (
@@ -394,13 +421,13 @@ function Get-Hwnd-title($winTitle, $instance = 0){
     {
         if ( $h -is [System.Array] )
         {
-
             $h = $h[$instance]
         }
         return $h
     }
 }
 
+<#
 #region getwindowrect
 Try { 
     [Void][Window]
@@ -448,6 +475,7 @@ filter ConvertTo-Rect2 ($name, $rc)
   $rc2
 }
 
+<#
 function get-windowrect_title($title){
     $WH  = Get-Hwnd $title
     $R   = New-Object RECT
@@ -463,7 +491,10 @@ function get-windowrect($id){
     #return $R
     return ConvertTo-Rect2 $title $R
 }
+#>
+
 #endregion
+#>
 
 function Stop-ProcessByPath {
     param(
@@ -637,7 +668,7 @@ function Get-RectangleMatrix_1{
         }
     }
 
-    write-host "dbg: 0 mov_count=$mov_count mov_maxcount=$mov_maxcount movieorient=$movieorient"
+    #write-host "dbg: 0 mov_count=$mov_count mov_maxcount=$mov_maxcount movieorient=$movieorient"
     #pause
 
     switch ($movieorient){
@@ -729,6 +760,13 @@ function Get-RectangleMatrix_2 {
         [int]$winborder           # ウィンドウの境界
     )
 
+    # ディスプレイサイズを取得
+    $disp = Get-DisplaySize
+    $width = $disp.width
+    $height = $disp.height
+    $winborder = $disp.winborder
+    $display_aspect_ratio = $width / $height
+
     # 表示するタイル数、縦横のタイル数を計算
     switch ($movieorient) {
         ([movieorienttype]::yoko) {
@@ -738,14 +776,27 @@ function Get-RectangleMatrix_2 {
                 $v_tilecount = $vertical_mov_mincount
             }
             $h_tilecount = [Math]::Ceiling($mov_count / $v_tilecount)
-        }
-        ([movieorienttype]::tate) {
-            $mov_count = [math]::Ceiling($mov_maxcount / $horizontal_mov_mincount) * $horizontal_mov_mincount
-            $h_tilecount = [Math]::Ceiling([Math]::Sqrt($mov_count / 2))
+
+            $mov_count = [math]::Ceiling($mov_maxcount / $vertical_mov_mincount) * $vertical_mov_mincount
+            #$h_tilecount = [Math]::Ceiling([Math]::Sqrt($mov_count / 2))
+            #$h_tilecount = [Math]::Ceiling([Math]::Sqrt($mov_count *1.5)) # 1.5 = y720/x480 (approximate movie aspect ratio)
+            $h_tilecount = [Math]::Ceiling([Math]::Sqrt($mov_count / $AverageHorizontalRatio * $display_aspect_ratio))
             if ($h_tilecount -lt $horizontal_mov_mincount) {
                 $h_tilecount = $horizontal_mov_mincount
             }
             $v_tilecount = [Math]::Ceiling($mov_count / $h_tilecount)
+        }
+        ([movieorienttype]::tate) {
+            $mov_count = [math]::Ceiling($mov_maxcount / $horizontal_mov_mincount) * $horizontal_mov_mincount
+            #$h_tilecount = [Math]::Ceiling([Math]::Sqrt($mov_count / 2))
+            #$h_tilecount = [Math]::Ceiling([Math]::Sqrt($mov_count *1.5)) # 1.5 = y720/x480 (approximate movie aspect ratio)
+            #$h_tilecount = [Math]::Ceiling([Math]::Sqrt($mov_count * $AverageHorizontalRatio * $display_aspect_ratio))
+            $h_tilecount = [Math]::Ceiling([Math]::Sqrt($mov_count / $AverageVerticalRatio * $display_aspect_ratio))
+            if ($h_tilecount -lt $horizontal_mov_mincount) {
+                $h_tilecount = $horizontal_mov_mincount
+            }
+            $v_tilecount = [Math]::Ceiling($mov_count / $h_tilecount)
+
         }
     }
 
@@ -761,19 +812,12 @@ function Get-RectangleMatrix_2 {
         if ($mov_maxcount -lt $mov_count){$mov_count = $mov_maxcount} #行*列>全動画数の場合、全動画数を優先(同じ動画の表示を抑制)
     }
 
-    # ディスプレイサイズを取得
-    $disp = Get-DisplaySize
-    $width = $disp.width
-    $height = $disp.height
-    $winborder = $disp.winborder
-
     # 動画の幅と高さを計算
     $mov_width = [Math]::Ceiling(($width + ($winborder * 2 * $h_tilecount)) / $h_tilecount)
     $mov_height = [Math]::Ceiling(($height + ($winborder * $v_tilecount)) / $v_tilecount)
 
     # デバッグ情報
-    write-host "dbg: mov_maxcount=$mov_maxcount movieorient=$movieorient"
-    write-host "dbg: mov_count=$mov_count tilecount v/h=$v_tilecount/$h_tilecount mov_w/h=$mov_width/$mov_height"
+    write-host "dbg: movieorient=$movieorient mov_count=$mov_count tilecount v/h=$v_tilecount/$h_tilecount mov_w/h=$mov_width/$mov_height"
 
     # 結果を返す
     return [PSCustomObject]@{
@@ -823,32 +867,102 @@ function get-displaysize
     }
 }
 
-function get-movie-orient{
-    #guess movie orient
+function get-intFromString
+{
     param (
-        $movie_list,$movie_orient_type
+        [string]$inputString
     )
 
-    if ($movie_orient_type -eq [movieorienttype]::guess){
-        $h_mov_count = 0
-        $v_mov_count = 0
-        #$movie_list | Select-Object -First $mov_maxcount | ForEach-Object {
-        $movie_list | ForEach-Object {
-            $res = get-VideoResolution $_
-            if ([int]$res.A_フレーム幅 -gt [int]$res.A_フレーム高){
-                $h_mov_count++
-            } else {
-                $v_mov_count++
-            }
-            #"dbg: {1},{2} h={3} v={4}:{0}" -f $res.name,$res.A_フレーム幅,$res.A_フレーム高, $h_mov_count, $v_mov_count
+    $result = 0 # 初期値
+
+    # 空文字列の場合は初期値を返す
+    if ([string]::IsNullOrWhiteSpace($inputString)) { return $result }
+
+    # 千区切りカンマ／空白を除去してから数字のみ抽出
+    $s = $inputString -replace '[,\s]', ''
+    if ($s -match '\d+') {
+        $num = $matches[0]
+        $val = 0
+        if ([int]::TryParse($num, [ref]$val)) { return $val }
+    }
+
+    return $result
+}
+
+function get-movie-orient{
+    # guess movie orient and compute average aspect ratios for horizontal/vertical groups
+    param (
+        $movie_list,
+        $movie_orient_type,
+        [ref]$AverageHorizontal = $null,
+        [ref]$AverageVertical   = $null
+    )
+
+    # guard: sanitize inputs
+    if (-not $movie_list) {
+        # nothing to analyze, set defaults and return requested type or guess
+        $avgH = 16.0/9.0
+        $avgV = 9.0/16.0
+        $movie_orient_type_default = [movieorienttype]::yoko
+        if ($AverageHorizontal -is [ref]) { $AverageHorizontal.Value = $avgH }
+        if ($AverageVertical   -is [ref]) { $AverageVertical.Value   = $avgV }
+        $global:AverageHorizontalRatio = $avgH
+        $global:AverageVerticalRatio   = $avgV
+        if ($movie_orient_type -eq [movieorienttype]::guess){
+            Write-Host ("no movies to analyze, defaulting movie orient to {0}  avgRatioH={1} avgRatioV={2}" -f $movie_orient_type_default.ToString(), $avgH, $avgV)
+            $movie_orient_type = $movie_orient_type_default
+        } else {
+            Write-Verbose ("no movies to analyze, using specified movie orient {0}  avgRatioH={1} avgRatioV={2}" -f $movie_orient_type.ToString(), $avgH, $avgV)
         }
+        return ([movieorienttype]$movie_orient_type)
+    }
+
+    $h_mov_count = 0
+    $v_mov_count = 0
+    $sumRatioH = 0.0
+    $sumRatioV = 0.0
+
+    foreach ($m in $movie_list) {
+        $res = Get-VideoResolution $m | Select-Object -First 1
+        if (-not $res) { continue }
+
+        $w = get-intFromString $res.'A_フレーム幅'
+        $h = get-intFromString $res.'A_フレーム高'
+
+        if ($h -eq 0) { continue }
+
+        $ratio = [double]$w / [double]$h
+
+        if ($w -gt $h) {
+            $h_mov_count++
+            $sumRatioH += $ratio
+        } else {
+            $v_mov_count++
+            $sumRatioV += $ratio
+        }
+    }
+
+    $avgH = if ($h_mov_count -gt 0) { [math]::Round($sumRatioH / $h_mov_count, 4) } else { $null }
+    $avgV = if ($v_mov_count -gt 0) { [math]::Round($sumRatioV / $v_mov_count, 4) } else { $null }
+
+    # return averages via byref parameters if provided
+    if ($AverageHorizontal -is [ref]) { $AverageHorizontal.Value = $avgH }
+    if ($AverageVertical   -is [ref]) { $AverageVertical.Value   = $avgV }
+
+    $global:AverageHorizontalRatio = $avgH
+    $global:AverageVerticalRatio   = $avgV
+
+    if ($movie_orient_type -eq [movieorienttype]::guess){
         if ($h_mov_count -ge $v_mov_count){
             $movie_orient_type = [movieorienttype]::yoko
         } else {
             $movie_orient_type = [movieorienttype]::tate
         }
-        write-host ("guessing movie orient ... horizontal,vertical={0},{1} => {2}" -f $h_mov_count,$v_mov_count,[movieorienttype].GetEnumName($movie_orient_type))
+        Write-Host ("guessing movie orient ... horizontal,vertical={0},{1} => {2}  avgRatioH={3} avgRatioV={4}" -f $h_mov_count,$v_mov_count,$movie_orient_type.ToString(), $avgH, $avgV)
+    } else {
+        Write-Verbose ("movie_orient_type specified: {0}  avgRatioH={1} avgRatioV={2}" -f $movie_orient_type.ToString(), $avgH, $avgV)
     }
+
     return $movie_orient_type
 }
 
@@ -857,7 +971,26 @@ function get-movie-orient{
 #region main
 <# multimov #>
 
+##### normalize param
+# Normalize movie orient param (string) to enum variable used by script
+if ($PSBoundParameters.ContainsKey('movieorient') -and -not [string]::IsNullOrWhiteSpace($movieorient)) {
+    try {
+        $movie_orient_type_param = [movieorienttype]$movieorient
+    } catch {
+        Write-Verbose "Invalid movieorient '$movieorient', defaulting to 'guess'"
+        $movie_orient_type_param = [movieorienttype]::guess
+    }
+} else {
+    $movie_orient_type_param = [movieorienttype]::guess
+}
+
+$horizontal_mov_mincount = $HorizontalMinCount
+$vertical_mov_mincount = $VerticalMinCount
+
+
 ##### check param
+Write-Verbose "dbg:`n param fol=$fol`n filter=$filter`n mov_maxcount=$mov_maxcount`n movie_orient_type_param=$movie_orient_type_param`n vertical_mov_mincount=$vertical_mov_mincount`n horizontal_mov_mincount=$horizontal_mov_mincount` random=$random`n loop=$loop"
+
 if ($fol -eq ""){
     Write-Warning "folder not specified"
     exit
@@ -869,21 +1002,11 @@ if (!(Test-Path $fol)){
 } 
 
 if ($filter -eq "") {$filter="*.*"}
-$loopflg = $true
-$movlist_pos=0
 
 
 ##### settings
-$mov_maxcount = 12
-$movie_orient_type_param = [movieorienttype]::guess #0=guess 1=yoko 2=tate
-$horizontal_mov_mincount = 6 #horizontal=yoko
-$vertical_mov_mincount = 1   #vertical=tate
-$h_tilecount = 0
-$v_tilecount = 0
 $keys_exit=@('Q','Space','Escape')
-$keys_next=@('N','Emter')
-$random=$false
-$random=$true
+$keys_next=@('N','Enter')
 
 
 ##### vlc settings
@@ -896,12 +1019,12 @@ $vlcarg = @(
     '--qt-continue=0',
     '--no-qt-updates-notif',
     '--no-qt-recentplay',
-    '--loop',
+#    '--loop',
 # not working (bug in vlc3?)
     '--width=0',
     '--height=0',
     "--video-x=0",
-    "--video-y=0",
+    "--video-y=0"
 # unusable. can't continue script
 #    '--no-embedded-video',
 # unusable. can't change position
@@ -912,11 +1035,24 @@ $vlcarg = @(
 #    '--directx-volume=0.100000',
 #    '--waveout-volume=0.100000',
 #    '--volume=50',
-    '' # this blank is used to set movie file path
+#    '' # this blank is used to set movie file path
 )
 
+if ($NoLoop -eq $false){
+    $vlcarg+='--loop'
+}
+
+$vlcarg+='' # this blank is used to set movie file path
+
+Write-Verbose "dbg: vlcarg=$vlcarg"
 
 #####
+$continueLoop = $true
+$movlist_pos = 0
+$h_tilecount = 0
+$v_tilecount = 0
+$avgH = 0
+$avgV = 0
 
 $movlistall = (Get-ChildItem $fol -file -Filter $filter).FullName
 if ($random){
@@ -925,12 +1061,13 @@ if ($random){
 
 if ($movlistall.count -lt $mov_maxcount){$mov_count = $movlistall.count} else {$mov_count = $mov_maxcount}
 
-while ($loopflg){
+while ($continueLoop){
 
     $mov = Get-CyclicSubArray $movlistall $movlist_pos $mov_count
 
-    $movieorient = get-movie-orient -movie_list @($mov) -movie_orient_type $movie_orient_type_param
-
+    #$movieorient = get-movie-orient -movie_list @($mov) -movie_orient_type $movie_orient_type_param
+    $movieorient = get-movie-orient -movie_list @($mov) -movie_orient_type $movie_orient_type_param -AverageHorizontal ([ref]$avgH) -AverageVertical ([ref]$avgV)
+ 
     $disp = get-displaysize
     $x_start = $disp.x_start
     $y_start = $disp.y_start
@@ -943,7 +1080,7 @@ while ($loopflg){
     $h_tilecount = $rmatrix.Columns
     $v_tilecount = $rmatrix.Rows
     $mov_count = $rmatrix.Mov_Count
-    "dbg:mov_count=$mov_count tilecount v/h=$v_tilecount/$h_tilecount mov_w/h=$mov_width/$mov_height xyoffset=$($disp.x_start),$($disp.y_start)"
+    write-verbose "dbg: mov_count=$mov_count tilecount v/h=$v_tilecount/$h_tilecount mov_w/h=$mov_width/$mov_height xyoffset=$($disp.x_start),$($disp.y_start)"
 
     $vlcarr = [System.Collections.ArrayList]::new()
 
@@ -954,66 +1091,49 @@ while ($loopflg){
         $vlcarr += Start-Process $vlcpath -ArgumentList $vlcarg -PassThru
     }
 
-# wait for vlc processes to start
-Do{
-    try {
-        $vlccount=(Get-Process -Name vlc).Count
-    } catch {
-    }
-    write-verbose "vlccount=$vlccount"
-    start-sleep -Milliseconds 300
-}while ($vlccount -lt $movcount)
-
-# wait for vlc to open files ... vlc title name uses metadata rather than filename if has one..
-$chktitle=$false
-if ($chktitle){
-    $i=0
-    do {
-        $i=0
-        $mov|ForEach-Object{
-            $filename = split-path $_ -Leaf
-            $hwnd = Get-Hwnd-title "$filename - VLCメディアプレイヤー"
-            if ($hwnd -ne 0){
-                $i++
-            }
+    # wait for vlc processes to start
+    Do{
+        try {
+            $vlccount=(Get-Process -Name vlc).Count
+        } catch {
         }
-        write-host "window found=$i"
+        write-verbose "vlccount=$vlccount"
         start-sleep -Milliseconds 300
-    }while ($i -lt $movcount)
-}
-
-# wait for vlc mainwindowhandle
-#  VLC window titles may use metadata instead of the filename.
-#  Movie titles can be null, so we cannot rely on them.
-#  Instead, we check that MainWindowHandle is not zero to ensure VLC windows have opened.
-Write-Host "waiting for vlc windows..."
-$vlcarr|ForEach-Object{
-    do {
-        $mainwindowhandle = (Get-Process -Id $_.id).MainWindowHandle
-        Write-verbose "dbg: $($_.id) $mainwindowhandle"
-        Start-Sleep -Milliseconds 300
-    }while ($mainwindowhandle -eq 0)
-}
+    }while ($vlccount -lt $mov_count)
 
 
-# arrange window position and size
-[int]$x=$x_start
-[int]$y=$y_start
-[int]$w=$mov_width
-[int]$h=$mov_height
-$i=0
-$vlcarr|ForEach-Object{
-    #Set-Window -Id $_.id -X $x -Y $y -Width $w -Height $h -Passthru -Verbose
-    Set-Window -Id $_.id -X $x -Y $y -Width $w -Height $h
-    $x += $w - ($winborder * 2)
-    $i++
-    if ($i -ge $h_tilecount){
-        $x = $x_start
-        $y += $h - $winborder
-        $i -= $h_tilecount
+    # wait for vlc mainwindowhandle
+    #  VLC window titles may use metadata instead of the filename.
+    #  Movie titles can be null, so we cannot rely on them.
+    #  Instead, we check that MainWindowHandle is not zero to ensure VLC windows have opened.
+    Write-Host "waiting for vlc windows..."
+    $vlcarr|ForEach-Object{
+        do {
+            $mainwindowhandle = (Get-Process -Id $_.id).MainWindowHandle
+            #Write-verbose "dbg: $($_.id) $mainwindowhandle"
+            Start-Sleep -Milliseconds 300
+        }while ($mainwindowhandle -eq 0)
     }
-    #"dbg {0} {1},{2} {3},{4}" -f $_.Id,$x,$y,$w,$h
-}
+
+
+    # arrange window position and size
+    [int]$x=$x_start
+    [int]$y=$y_start
+    [int]$w=$mov_width
+    [int]$h=$mov_height
+    $i=0
+    $vlcarr|ForEach-Object{
+        #Set-Window -Id $_.id -X $x -Y $y -Width $w -Height $h -Passthru -Verbose
+        Set-Window -Id $_.id -X $x -Y $y -Width $w -Height $h
+        $x += $w - ($winborder * 2)
+        $i++
+        if ($i -ge $h_tilecount){
+            $x = $x_start
+            $y += $h - $winborder
+            $i -= $h_tilecount
+        }
+        #"dbg {0} {1},{2} {3},{4}" -f $_.Id,$x,$y,$w,$h
+    }
 
 
     #####
@@ -1026,7 +1146,7 @@ $vlcarr|ForEach-Object{
             Write-Host "quitting.."
             Stop-ProcessByPath $vlcPath
             $playflg=$false
-            $loopflg=$false
+            $continueLoop=$false
         }
         if ($key -in $keys_next) {
             Write-Host "next.."
