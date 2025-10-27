@@ -1220,7 +1220,7 @@ while ($continueLoop){
     $y_start = $disp.y_start
     $winborder = $disp.winborder
 
-    # use the function to select the best matrix
+    # compute rectangle matrix
     #$rmatrix = Get-RectangleMatrix_1 -ContainerWidth $disp.width -ContainerHeight $disp.height -mov_maxcount $mov_maxcount -movieorient $movieorient -vertical_mov_mincount $vertical_mov_mincount -horizontal_mov_mincount $horizontal_mov_mincount
     #$rmatrix = Get-RectangleMatrix_2 -ContainerWidth $disp.width -ContainerHeight $disp.height -mov_maxcount $mov_count -movieorient $movieorient -vertical_mov_mincount $vertical_mov_mincount -horizontal_mov_mincount $horizontal_mov_mincount
     $rmatrix = Select-RectangleMatrix -Disp $disp -MovCount $mov_count -VerticalMin $vertical_mov_mincount -HorizontalMin $horizontal_mov_mincount -SumAreaH $sumAreaH -SumAreaV $sumAreaV -AvgH $avgH -AvgV $avgV -MovieOrient $movieorient
