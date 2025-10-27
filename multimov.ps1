@@ -986,6 +986,113 @@ function get-movie-orient{
     return $movie_orient_type
 }
 
+    function Select-RectangleMatrix {
+        param (
+            [Parameter(Mandatory=$true)][pscustomobject]$Disp,
+            [Parameter(Mandatory=$true)][int]$MovCount,
+            [Parameter(Mandatory=$true)][int]$VerticalMin,
+            [Parameter(Mandatory=$true)][int]$HorizontalMin,
+            [Parameter(Mandatory=$true)][int]$SumAreaH,
+            [Parameter(Mandatory=$true)][int]$SumAreaV,
+            [Parameter(Mandatory=$true)][double]$AvgH,
+            [Parameter(Mandatory=$true)][double]$AvgV,
+            [Parameter(Mandatory=$true)][movieorienttype]$MovieOrient
+        )
+
+        # compute candidate matrices for vertical and horizontal preference
+        $rmatrix_v = Get-RectangleMatrix_2 -ContainerWidth $Disp.width -ContainerHeight $Disp.height -mov_maxcount $MovCount -movieorient ([movieorienttype]::tate) -vertical_mov_mincount $VerticalMin -horizontal_mov_mincount $HorizontalMin
+        $rmatrix_h = Get-RectangleMatrix_2 -ContainerWidth $Disp.width -ContainerHeight $Disp.height -mov_maxcount $MovCount -movieorient ([movieorienttype]::yoko) -vertical_mov_mincount $VerticalMin -horizontal_mov_mincount $HorizontalMin
+
+        $diff_movcount_v = [math]::Abs($rmatrix_v.Columns * $rmatrix_v.Rows - $MovCount)
+        $diff_movcount_h = [math]::Abs($rmatrix_h.Columns * $rmatrix_h.Rows - $MovCount)
+
+        if (($SumAreaH -eq $SumAreaV) -or ($SumAreaH -lt 1) -or ($SumAreaV -lt 1)) {
+            if ($diff_movcount_v -eq $diff_movcount_h) {
+                $area_v = $rmatrix_v.Width * $rmatrix_v.Height
+                $area_h = $rmatrix_h.Width * $rmatrix_h.Height
+                if ($area_v -eq $area_h) {
+                    [double]$avgRatio = if ($MovieOrient -eq [movieorienttype]::yoko) { $AvgH } else { $AvgV }
+                    [double]$diff_v = [math]::Abs( ($rmatrix_v.Width / $rmatrix_v.Height) - $avgRatio )
+                    [double]$diff_h = [math]::Abs( ($rmatrix_h.Width / $rmatrix_h.Height) - $avgRatio )
+                    if ($diff_v -le $diff_h) {
+                        $rmatrix = $rmatrix_v
+                        Write-Verbose ("dbg: selected v-oriented matrix by aspect ratio: diff_v={0} diff_h={1}" -f $diff_v, $diff_h)
+                    } else {
+                        $rmatrix = $rmatrix_h
+                        Write-Verbose ("dbg: selected h-oriented matrix by aspect ratio: diff_v={0} diff_h={1}" -f $diff_v, $diff_h)
+                    }
+                } elseif ($area_v -gt $area_h) {
+                    $rmatrix = $rmatrix_v
+                    Write-Verbose ("dbg: selected v-oriented matrix by area: area_v={0} area_h={1}" -f $area_v, $area_h)
+                } else {
+                    $rmatrix = $rmatrix_h
+                    Write-Verbose ("dbg: selected h-oriented matrix by area: area_v={0} area_h={1}" -f $area_v, $area_h)
+                }
+            } elseif ($diff_movcount_v -lt $diff_movcount_h) {
+                $rmatrix = $rmatrix_v
+                Write-Verbose ("dbg: selected v-oriented matrix: diff_movcount_v={0} diff_movcount_h={1}" -f $diff_movcount_v, $diff_movcount_h)
+            } else {
+                $rmatrix = $rmatrix_h
+                Write-Verbose ("dbg: selected h-oriented matrix: diff_movcount_v={0} diff_movcount_h={1}" -f $diff_movcount_v, $diff_movcount_h)
+            }
+        } elseif ($SumAreaH -gt $SumAreaV) {
+            $rmatrix = $rmatrix_h
+            Write-Verbose ("dbg: selected h-oriented matrix by sum area: sumAreaH={0} sumAreaV={1}" -f $SumAreaH, $SumAreaV)
+        } else {
+            $rmatrix = $rmatrix_v
+            Write-Verbose ("dbg: selected v-oriented matrix by sum area: sumAreaH={0} sumAreaV={1}" -f $SumAreaH, $SumAreaV)
+        }
+
+        Write-Verbose ("dbg: computed matrix v/h={0}/{1} for mov_count={2}" -f $rmatrix.Rows, $rmatrix.Columns, $MovCount)
+
+        return $rmatrix
+    }
+
+    function Start-VlcInstances {
+        param (
+            [Parameter(Mandatory=$true)][string[]]$MovList,
+            [Parameter(Mandatory=$true)][string]$VlcPath,
+            [Parameter(Mandatory=$true)][object[]]$VlcArg,
+            [Parameter(Mandatory=$true)][int]$MovCount
+        )
+
+        $vlcarr = [System.Collections.ArrayList]::new()
+
+        foreach ($m in $MovList) {
+            # make a copy of the arg array and set the last element to the quoted movie path
+            $argsCopy = @()
+            $VlcArg | ForEach-Object { $argsCopy += $_ }
+            $argsCopy[$argsCopy.Count - 1] = '"{0}"' -f $m
+
+            $vlcarr += Start-Process -FilePath $VlcPath -ArgumentList $argsCopy -PassThru
+        }
+
+        # wait for vlc processes to appear
+        do {
+            $vlccount = 0
+            try {
+                $proc = Get-Process -Name vlc -ErrorAction SilentlyContinue
+                if ($proc) { $vlccount = $proc.Count } else { $vlccount = 0 }
+            } catch { $vlccount = 0 }
+            Write-Verbose "vlccount=$vlccount"
+            Start-Sleep -Milliseconds 300
+        } while ($vlccount -lt $MovCount)
+
+        # wait for each vlc main window handle to be non-zero
+        Write-Host "waiting for vlc windows..."
+        foreach ($p in $vlcarr) {
+            do {
+                $proc = Get-Process -Id $p.Id -ErrorAction SilentlyContinue
+                $mainwindowhandle = $null
+                if ($proc) { $mainwindowhandle = $proc.MainWindowHandle }
+                Start-Sleep -Milliseconds 300
+            } while ($mainwindowhandle -eq 0)
+        }
+
+        return $vlcarr
+    }
+
+
 #endregion
 
 #region main
@@ -1075,6 +1182,7 @@ $avgH = 0
 $avgV = 0
 $sumAreaH = 0
 $sumAreaV = 0
+$vlcarr = [System.Collections.ArrayList]::new()
 
 # only enumerate common video extensions (unless a specific filter is provided)
 $videoExtensions = @('*.mp4','*.mkv','*.avi','*.mov','*.wmv','*.flv','*.webm','*.m4v','*.mpeg','*.mpg','*.ts','*.m2ts','*.3gp')
@@ -1095,80 +1203,27 @@ if ($movlistall.count -eq 0){
     exit
 }
 
-if ($random){
-    $movlistall = $movlistall|Get-Random -Count $movlistall.count
-}
+if ($random){$movlistall = $movlistall|Get-Random -Count $movlistall.count}
 
 if ($movlistall.count -lt $mov_maxcount){$mov_count = $movlistall.count} else {$mov_count = $mov_maxcount}
 
 while ($continueLoop){
-
+    # select movies to play
     $mov = Get-CyclicSubArray $movlistall $movlist_pos $mov_count
 
-    #$movieorient = get-movie-orient -movie_list @($mov) -movie_orient_type $movie_orient_type_param
+    # guess movie orient and average aspect ratios
     $movieorient = get-movie-orient -movie_list @($mov) -movie_orient_type $movie_orient_type_param -AverageHorizontal ([ref]$avgH) -AverageVertical ([ref]$avgV) -SumAreaHorizontal ([ref]$sumAreaH) -SumAreaVertical ([ref]$sumAreaV)
- 
+
+    # get display size and window border
     $disp = get-displaysize
     $x_start = $disp.x_start
     $y_start = $disp.y_start
     $winborder = $disp.winborder
 
+    # use the function to select the best matrix
     #$rmatrix = Get-RectangleMatrix_1 -ContainerWidth $disp.width -ContainerHeight $disp.height -mov_maxcount $mov_maxcount -movieorient $movieorient -vertical_mov_mincount $vertical_mov_mincount -horizontal_mov_mincount $horizontal_mov_mincount
     #$rmatrix = Get-RectangleMatrix_2 -ContainerWidth $disp.width -ContainerHeight $disp.height -mov_maxcount $mov_count -movieorient $movieorient -vertical_mov_mincount $vertical_mov_mincount -horizontal_mov_mincount $horizontal_mov_mincount
-
-    # select the matrix with tilecount closer to mov_count
-    $rmatrix_v = Get-RectangleMatrix_2 -ContainerWidth $disp.width -ContainerHeight $disp.height -mov_maxcount $mov_count -movieorient ([movieorienttype]::tate).value__ -vertical_mov_mincount $vertical_mov_mincount -horizontal_mov_mincount $horizontal_mov_mincount
-    $rmatrix_h = Get-RectangleMatrix_2 -ContainerWidth $disp.width -ContainerHeight $disp.height -mov_maxcount $mov_count -movieorient ([movieorienttype]::yoko).value__ -vertical_mov_mincount $vertical_mov_mincount -horizontal_mov_mincount $horizontal_mov_mincount
-    $diff_movcount_v = [math]::Abs($rmatrix_v.Columns*$rmatrix_v.Rows - $mov_count)
-    $diff_movcount_h = [math]::Abs($rmatrix_h.Columns*$rmatrix_h.Rows - $mov_count)
-
-    if (($sumAreaH -eq $sumAreaV) -or ($sumAreaH -lt 1) -or ($sumAreaV -lt 1)){
-        # if both sum areas are equal (or invalid), select by movcount diff
-        if ($diff_movcount_v -eq $diff_movcount_h){
-            # if both diffs are equal, select the one with larger area      
-            $area_v = $rmatrix_v.Width * $rmatrix_v.Height
-            $area_h = $rmatrix_h.Width * $rmatrix_h.Height
-            if ($area_v -eq $area_h){
-                # if both areas are equal, select the one with aspect ratio closer to average
-                [double]$avgRatio = 0.0
-                if ($movieorient -eq [movieorienttype]::yoko){
-                    $avgRatio = $avgH
-                } else {
-                    $avgRatio = $avgV
-                }
-                [double]$diff_v = [math]::Abs( ($rmatrix_v.Width / $rmatrix_v.Height) - $avgRatio )
-                [double]$diff_h = [math]::Abs( ($rmatrix_h.Width / $rmatrix_h.Height) - $avgRatio )
-                if ($diff_v -le $diff_h){
-                    $rmatrix = $rmatrix_v
-                    write-verbose ("dbg: selected v-oriented matrix by aspect ratio: diff_v=$diff_v diff_h=$diff_h")
-                } else {
-                    $rmatrix = $rmatrix_h
-                    write-verbose ("dbg: selected h-oriented matrix by aspect ratio: diff_v=$diff_v diff_h=$diff_h")
-                }
-            } elseif ($area_v -gt $area_h){
-                $rmatrix = $rmatrix_v
-                write-verbose ("dbg: selected v-oriented matrix by area: area_v=$area_v area_h=$area_h")
-            } else {
-                $rmatrix = $rmatrix_h
-                write-verbose ("dbg: selected h-oriented matrix by area: area_v=$area_v area_h=$area_h")
-            }
-        } elseif ($diff_movcount_v -lt $diff_movcount_h){
-            $rmatrix = $rmatrix_v
-            write-verbose ("dbg: selected v-oriented matrix: diff_movcount_v=$diff_movcount_v diff_movcount_h=$diff_movcount_h")
-        } else {
-            $rmatrix = $rmatrix_h
-            write-verbose ("dbg: selected h-oriented matrix: diff_movcount_v=$diff_movcount_v diff_movcount_h=$diff_movcount_h")
-        }
-    } elseif ($sumAreaH -gt $sumAreaV){
-        # if horizontal sum area is larger, prefer h-oriented matrix
-        $rmatrix = $rmatrix_h
-        write-verbose ("dbg: selected h-oriented matrix by sum area: sumAreaH=$sumAreaH sumAreaV=$sumAreaV")
-    } else {
-        # if vertical sum area is larger, prefer v-oriented matrix
-        $rmatrix = $rmatrix_v
-        write-verbose ("dbg: selected v-oriented matrix by sum area: sumAreaH=$sumAreaH sumAreaV=$sumAreaV")
-    }
-    write-verbose ("dbg: computed matrix v/h={0}/{1} for mov_count={2}" -f $rmatrix.Rows, $rmatrix.Columns, $mov_count)
+    $rmatrix = Select-RectangleMatrix -Disp $disp -MovCount $mov_count -VerticalMin $vertical_mov_mincount -HorizontalMin $horizontal_mov_mincount -SumAreaH $sumAreaH -SumAreaV $sumAreaV -AvgH $avgH -AvgV $avgV -MovieOrient $movieorient
 
     # get movie window size and tilecount
     $mov_width = $rmatrix.Width
@@ -1176,65 +1231,32 @@ while ($continueLoop){
     $h_tilecount = $rmatrix.Columns
     $v_tilecount = $rmatrix.Rows
     $mov_count = $rmatrix.Mov_Count
-    write-verbose "dbg: mov_count=$mov_count tilecount v/h=$v_tilecount/$h_tilecount mov_w/h=$mov_width/$mov_height xyoffset=$($disp.x_start),$($disp.y_start)"
+    Write-Verbose ("dbg: mov_count={0} tilecount v/h={1}/{2} mov_w/h={3}/{4} xyoffset={5},{6}" -f $mov_count, $v_tilecount, $h_tilecount, $mov_width, $mov_height, $disp.x_start, $disp.y_start)
 
-    $vlcarr = [System.Collections.ArrayList]::new()
-
+    # stop existing vlc processes
     Stop-ProcessByPath $vlcPath
 
-    $mov|ForEach-Object{
-        $vlcarg[$vlcarg.count-1]="""$_"""
-        $vlcarr += Start-Process $vlcpath -ArgumentList $vlcarg -PassThru
-    }
+    # start vlc instances
+    $vlcarr = Start-VlcInstances -MovList $mov -VlcPath $vlcPath -VlcArg $vlcarg -MovCount $mov_count
 
-    # wait for vlc processes to start
-    Do{
-        try {
-            $vlccount=(Get-Process -Name vlc).Count
-        } catch {
-        }
-        write-verbose "vlccount=$vlccount"
-        start-sleep -Milliseconds 300
-    }while ($vlccount -lt $mov_count)
-
-
-    # wait for vlc mainwindowhandle
-    #  VLC window titles may use metadata instead of the filename.
-    #  Movie titles can be null, so we cannot rely on them.
-    #  Instead, we check that MainWindowHandle is not zero to ensure VLC windows have opened.
-    Write-Host "waiting for vlc windows..."
-    $vlcarr|ForEach-Object{
-        do {
-            $mainwindowhandle = (Get-Process -Id $_.id).MainWindowHandle
-            #Write-verbose "dbg: $($_.id) $mainwindowhandle"
-            Start-Sleep -Milliseconds 300
-        }while ($mainwindowhandle -eq 0)
-    }
-
-
-    # arrange window position and size
+    # arrange vlc windows
     [int]$x=$x_start
     [int]$y=$y_start
-    [int]$w=$mov_width
-    [int]$h=$mov_height
     $i=0
     $vlcarr|ForEach-Object{
-        #Set-Window -Id $_.id -X $x -Y $y -Width $w -Height $h -Passthru -Verbose
-        Set-Window -Id $_.id -X $x -Y $y -Width $w -Height $h
-        $x += $w - ($winborder * 2)
+        Set-Window -Id $_.id -X $x -Y $y -Width $mov_width -Height $mov_height
+        $x += $mov_width - ($winborder * 2)
         $i++
         if ($i -ge $h_tilecount){
             $x = $x_start
-            $y += $h - $winborder
-            $i -= $h_tilecount
+            $y += $mov_height - $winborder
+            $i = 0
         }
         #"dbg {0} {1},{2} {3},{4}" -f $_.Id,$x,$y,$w,$h
     }
 
-
-    #####
+    # wait for key input
     $playflg=$true
-
     while ($playflg) {
         $key = [System.Windows.Forms.Keys][KeyLogger.Program]::WaitForKey()
         "[$key]"
@@ -1249,7 +1271,7 @@ while ($continueLoop){
             $playflg=$false
             $movlist_pos += $mov_count
         }
-
+        # reduce CPU load
         Start-Sleep -Milliseconds 300
     }
 
